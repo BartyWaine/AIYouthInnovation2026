@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login – AI Youth Innovation 2026</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <header class="nav">
+    <h1>AI Youth Innovation 2026</h1>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="#competitions">Competitions</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h2>Login</h2>
+      <p>Please enter your credentials to access the competition platform.</p>
+    </section>
+
+    <section class="login-form">
+      <form id="login-form" class="login-form">
+        <input type="email" id="email" placeholder="Email" required />
+        <input type="password" id="password" placeholder="Password" required />
+        <button type="submit">Login</button>
+      </form>
+      <p id="login-message" class="message"></p>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('login-form');
+    const messageEl = document.getElementById('login-message');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+
+      try {
+        const resp = await fetch('/api/v1/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ username: email, password }).toString(),
+        });
+        if (!resp.ok) throw new Error('Invalid credentials');
+        const data = await resp.json();
+        // Store token for subsequent API calls
+        localStorage.setItem('access_token', data.access_token);
+        // Redirect to home page after successful login
+        window.location.href = 'index.html';
+      } catch (err) {
+        messageEl.textContent = err.message;
+        messageEl.style.color = 'red';
+      }
+    });
+  </script>
+</body>
+</html>

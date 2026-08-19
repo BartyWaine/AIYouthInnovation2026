@@ -1,0 +1,15 @@
+import api from './client'
+
+export const createJudge = (userId) => api.post('/judges', null, { params: { user_id: userId } }).then(r => r.data)
+export const createAssignment = (judgeId, teamId, compId) => api.post('/judges/assignments', null, { params: { judge_id: judgeId, team_id: teamId, competition_id: compId } }).then(r => r.data)
+export const listEvaluations = (compId) => api.get(`/judges/competitions/${compId}/evaluations`).then(r => r.data)
+export const createEvaluation = (judgeId, teamId, compId) => api.post('/judges/evaluations', null, { params: { judge_id: judgeId, team_id: teamId, competition_id: compId } }).then(r => r.data)
+export const addScore = (evalId, criterionId, score, comment) => api.post(`/judges/evaluations/${evalId}/scores`, null, { params: { criterion_id: criterionId, score, comment } }).then(r => r.data)
+export const listCriteria = () => api.get('/admin/evaluation-criteria').then(r => r.data)
+export const createCriterion = (name, weight) => api.post('/admin/evaluation-criteria', null, { params: { name, weight } }).then(r => r.data)
+export const listMyAssignments = () => api.get('/judges/my-assignments').then(r => r.data)
+export const getCriteria = () => api.get('/judges/evaluations/criteria').then(r => r.data)
+export const createMyEvaluation = (teamId, compId) => api.post('/judges/evaluations/mine', null, { params: { team_id: teamId, competition_id: compId } }).then(r => r.data)
+export const getCompetitionScores = (compId) => api.get(`/judges/competitions/${compId}/scores`).then(r => r.data)
+export const listMyEvaluations = (compId) => api.get('/judges/evaluations', { params: { comp_id: compId } }).then(r => r.data)
+export const getJudgeAllSubmissions = () => api.get('/judges/submissions').then(r => r.data)

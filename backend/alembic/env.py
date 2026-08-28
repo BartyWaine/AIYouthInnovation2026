@@ -18,7 +18,7 @@ target_metadata = Base.metadata
 config = context.config
 
 # Reuse the application's existing environment-variable-based database
-# configuration (app/database.py reads POSTGRES_URL). Credentials are
+# configuration (app/database.py reads DATABASE_URL). Credentials are
 # never hardcoded here.
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 

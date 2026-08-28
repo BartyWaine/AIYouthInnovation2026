@@ -6,7 +6,7 @@ import os
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-DATABASE_URL = os.getenv("POSTGRES_URL") or "sqlite:///./test.db"
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL") or "sqlite:///./test.db"
 
 engine = create_engine(
     DATABASE_URL,

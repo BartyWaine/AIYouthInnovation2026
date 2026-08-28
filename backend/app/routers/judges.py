@@ -191,6 +191,13 @@ def add_score(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role('JUDGE')),
 ):
+    # Scores must be whole numbers from 1 to 10 (see judging framework).
+    if score != int(score) or not (1 <= int(score) <= 10):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Score must be a whole number between 1 and 10",
+        )
+    score = int(score)
     evaluation = db.get(models.Evaluation, evaluation_id)
     if evaluation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")

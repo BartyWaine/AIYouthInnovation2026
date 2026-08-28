@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from ..database import SessionLocal
 from .. import models
@@ -75,6 +76,19 @@ def create_criterion(
     db: Session = Depends(get_db),
     admin: models.User = Depends(require_role('ADMIN')),
 ):
+    if weight <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Weight must be a positive number",
+        )
+    current_total = db.query(
+        func.coalesce(func.sum(models.EvaluationCriteria.weight), 0)
+    ).scalar()
+    if current_total + weight > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Criterion weights must total exactly 100% (current total: {current_total})",
+        )
     criterion = models.EvaluationCriteria(name=name, weight=weight)
     db.add(criterion)
     db.commit()

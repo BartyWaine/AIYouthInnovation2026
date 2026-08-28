@@ -161,7 +161,7 @@ DATABASE_URL=postgresql://user:password@localhost:5432/competition_db
 
 ### Environment Variable
 
-The codebase uses `DATABASE_URL` as the cross-environment database variable (in `backend/app/database.py`). For backward compatibility, `POSTGRES_URL` is also read as a fallback.
+The codebase uses `DATABASE_URL` as the cross-environment database variable (in `backend/app/database.py`). For backward compatibility only, a legacy `POSTGRES_URL` value is still accepted as a fallback if `DATABASE_URL` is unset. New deployments should set `DATABASE_URL`.
 
 ### Migrations
 
@@ -271,16 +271,36 @@ Key tables: `users`, `teams`, `team_members`, `competitions`, `deliverables`, `s
 
 ## Testing
 
-### Test Script
+> **Status:** The repository has **no automated unit-test suite** yet — the `tests/` directory contains only a `.gitkeep` placeholder. Integration coverage is provided by `backend/test_full_flow.py`.
+
+### Integration test (end-to-end)
 
 ```bash
 cd backend
 python test_full_flow.py
 ```
 
-Tests: team login → file upload → judge login → judge sees submission → file download.
+This is the principal test command. It exercises the live API against running servers and covers the following AGENTS.md categories:
 
-Run from the `backend/` directory with both backend and frontend servers running.
+| AGENTS.md required area | Covered by `test_full_flow.py` |
+|-------------------------|--------------------------------|
+| Authentication | ✅ Team + judge login (`/auth/login`), JWT returned |
+| Team uploads | ✅ Team uploads a file to a submission |
+| Judge assignment | ✅ Judge sees only assigned submissions |
+| Scoring / evaluation | ⚠️ Not asserted in script (manual via judge dashboard) |
+| Authorized file download | ✅ Judge downloads the uploaded file (200 + `Content-Disposition`) |
+| Invalid / unauthorized requests | ⚠️ Partial (relies on server-side role checks; no explicit negative test) |
+| Database migrations | ⚠️ Not covered (run `alembic upgrade head` separately) |
+| Admin workflows | ⚠️ Not covered (manual via admin UI/API) |
+
+Run it from `backend/` with **both** the backend (`uvicorn app.main:app --host 127.0.0.1 --port 8022`) and frontend (`npm run dev`) running. It prints the login result, upload metadata (`version`, `submitted_at`), and the download result.
+
+### Other verification scripts
+
+```bash
+cd backend
+python check_db.py          # Verifies the submission_files schema (submitted_at column)
+```
 
 ### Seeding
 
@@ -290,6 +310,10 @@ python setup_55_teams.py
 ```
 
 Wipes and re-seeds the database with 55 teams, 5 judges, 1 admin, and 3 competitions.
+
+### TODO
+
+Add a `tests/` suite (pytest) covering authentication, admin workflows, uploads, judge assignment, scoring, download authorization, unauthorized access, and migrations. Document the exact command (`pytest tests/`) once added.
 
 ---
 

@@ -195,7 +195,7 @@
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `POSTGRES_URL` | `sqlite:///./test.db` | Database connection string |
+| `DATABASE_URL` | `sqlite:///./test.db` | Database connection string (dev SQLite / prod PostgreSQL) |
 | `JWT_SECRET` | *(random)* | Secret key for JWT signing |
 | `OPENAI_API_KEY` | *(empty)* | OpenAI API key (future AI features) |
 | `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | Frontend API base URL |

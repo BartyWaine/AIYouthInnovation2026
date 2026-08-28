@@ -215,7 +215,6 @@ def add_score(
             comment=comment,
         )
         db.add(score_row)
-        score_row = score_row
     db.commit()
     db.refresh(existing if existing else score_row)
     result = existing if existing else score_row

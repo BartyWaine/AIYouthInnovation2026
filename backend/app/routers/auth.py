@@ -50,18 +50,18 @@ def read_me(current_user: models.User = Depends(get_current_user)):
 def register(
     email: str,
     password: str,
-    role: str = "TEAM_MEMBER",
     db: Session = Depends(get_db),
 ):
-    if role not in models.UserRole.__members__:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role")
+    # Self-registration is restricted to TEAM_MEMBER accounts only.
+    # Admin/Judge accounts must be created via the admin endpoints to
+    # prevent privilege escalation.
     existing = db.query(models.User).filter(models.User.email == email).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
     user = models.User(
         email=email,
         password_hash=get_password_hash(password),
-        role=models.UserRole[role],
+        role=models.UserRole.TEAM_MEMBER,
     )
     db.add(user)
     db.commit()

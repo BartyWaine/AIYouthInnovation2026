@@ -27,6 +27,50 @@ def get_db():
         db.close()
 
 
+def _authorize_submission_access(db: Session, user: models.User, submission: models.Submission):
+    """Enforce that a user may only access submissions they are entitled to.
+
+    - ADMIN: full access (oversight)
+    - TEAM_MEMBER: only their own team's submissions
+    - JUDGE: only teams they are assigned to
+    """
+    role = user.role.value
+    if role == "ADMIN":
+        return
+    if role == "TEAM_MEMBER":
+        member = db.query(models.TeamMember).filter(
+            models.TeamMember.team_id == submission.team_id,
+            models.TeamMember.user_id == user.id,
+        ).first()
+        if not member:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to access this submission",
+            )
+        return
+    if role == "JUDGE":
+        judge = db.query(models.Judge).filter(models.Judge.user_id == user.id).first()
+        if not judge:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to access this submission",
+            )
+        assignment = db.query(models.JudgeAssignment).filter(
+            models.JudgeAssignment.judge_id == judge.id,
+            models.JudgeAssignment.team_id == submission.team_id,
+        ).first()
+        if not assignment:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Judge not assigned to this team",
+            )
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Not authorized to access this submission",
+    )
+
+
 def _parse_deadline(value: str = None):
     if not value:
         return None
@@ -292,6 +336,7 @@ def list_files(
     submission = db.get(models.Submission, submission_id)
     if not submission:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+    _authorize_submission_access(db, current_user, submission)
     files = db.query(models.SubmissionFile).filter(models.SubmissionFile.submission_id == submission_id).all()
     return [
         {
@@ -318,6 +363,7 @@ def download_file(
     submission = db.get(models.Submission, submission_id)
     if not submission:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+    _authorize_submission_access(db, current_user, submission)
     file_record = db.query(models.SubmissionFile).filter(
         models.SubmissionFile.id == file_id,
         models.SubmissionFile.submission_id == submission_id,

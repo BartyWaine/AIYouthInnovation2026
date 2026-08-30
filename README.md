@@ -26,7 +26,7 @@ cp ../.env.example .env
 alembic upgrade head
 
 # 4. Seed the database with 55 teams, 5 judges, and 1 admin
-python setup_55_teams.py
+SEED_DEV=1 python setup_55_teams.py
 
 # 5. Start the server
 uvicorn app.main:app --host 127.0.0.1 --port 8022
@@ -61,14 +61,14 @@ In production, build the frontend with `npm run build` which outputs static file
 > **These credentials are for development and testing only.**
 > If this system will be used for a live competition, **change all passwords** or **disable these accounts** before deployment.
 
-| Role       | Email                  | Password   | Count |
-|------------|------------------------|------------|-------|
-| **Admin**  | `admin@sti.edu.mm`     | `admin123` | 1     |
-| **Judge**  | `judge1@sti.edu.mm`    | `judge123` | 5     |
-|            | `judge2@sti.edu.mm`    | `judge123` |       |
-|            | `judge3@sti.edu.mm`    | `judge123` |       |
-|            | `judge4@sti.edu.mm`    | `judge123` |       |
-|            | `judge5@sti.edu.mm`    | `judge123` |       |
+| Role          | Email                  | Password   | Count |
+|---------------|------------------------|------------|-------|
+| **Admin**     | `admin@sti.edu.mm`     | `admin123` | 1     |
+| **Head Judge** | `judge1@sti.edu.mm`   | `judge123` | 1     |
+| **Judge**      | `judge2@sti.edu.mm`   | `judge123` | 4     |
+|               | `judge3@sti.edu.mm`    | `judge123` |       |
+|               | `judge4@sti.edu.mm`   | `judge123` |       |
+|               | `judge5@sti.edu.mm`    | `judge123` |       |
 | **Team**   | `team1@sti.edu.mm`     | `team123`  | 55    |
 |            | `team2@sti.edu.mm`     | `team123`  |       |
 |            | ...                    | `team123`  |       |
@@ -208,15 +208,44 @@ Migrations support both SQLite (development) and PostgreSQL (production) dialect
   - Score input (number box, submits on blur)
 - Can filter by competition (all / comp 1 / comp 2 / comp 3)
 
-### 5. File Handling
-- **Upload**: Team uploads file → backend saves with UUID filename → returns metadata (version, submitted_at)
-- **Replace**: Same file ID, version auto-increments → previous version is overwritten
-- **Download**: Judge/Team requests file → backend verifies JWT + role → streams file with `Content-Disposition`
+### 5. Head Judge Flow
+- Head Judge logs in → sees "Head Judge" link in navbar → navigates to `/head-judge-dashboard`
+- Selects a competition to view a score matrix: all teams × all judges with per-criterion scores
+- Status badges show OPEN / SUBMITTED / LOCKED / FINALIZED per evaluation
+- Actions available per evaluation:
+  - **Lock** — prevents ordinary judges from editing scores
+  - **Finalize** — locks the evaluation permanently
+  - **Reopen** (requires reason) — unlocks a finalized evaluation for corrections
+- **Correct** — Head Judge can edit any judge's score; requires a correction reason; creates an audit log entry with old/new value
+- **Audit Trail** — per-evaluation history of all actions (who did what, when, with reason)
+- ADMIN has full access to all Head Judge features
 
 ### 6. Evaluation
-- Judge enters a score (1-10) per team in the dashboard table
+
+- Judge enters a score (1–10, integer) per team per criterion in the dashboard
 - Score submits automatically on blur (onBlur event)
 - Scores appear inline in the dashboard table
+
+#### Evaluation Lifecycle (Head Judge / Admin controls)
+
+| Status | Description |
+|--------|-------------|
+| OPEN | Scores can be added/edited by the assigned judge |
+| SUBMITTED | Judge has submitted; editing still allowed by Head Judge |
+| LOCKED | No more score edits by ordinary judges; Head Judge can still correct |
+| FINALIZED | Evaluation is locked; only Head Judge or Admin can reopen with reason |
+
+Valid transitions: OPEN → SUBMITTED, LOCKED; SUBMITTED → OPEN, LOCKED; LOCKED → FINALIZED, OPEN; FINALIZED → OPEN (requires reason).
+
+#### Score Corrections
+
+When a judge locks/finalizes an evaluation, the Head Judge can still correct any mark via `/judges/evaluations/{id}/scores/correct` (PATCH). Corrections require a mandatory reason and are recorded with old/new values, corrector ID, and timestamp.
+
+#### Audit Trail
+
+Every evaluation action (create, score, lock, finalize, correct, reopen) is recorded in `audit_logs` with: actor role, old/new value, timestamp, and reason.
+
+### 7. File Handling
 
 ---
 
@@ -271,45 +300,24 @@ Key tables: `users`, `teams`, `team_members`, `competitions`, `deliverables`, `s
 
 ## Testing
 
-> **Status:** The repository has **no automated unit-test suite** yet — the `tests/` directory contains only a `.gitkeep` placeholder. Integration coverage is provided by `backend/test_full_flow.py`.
-
-### Integration test (end-to-end)
+### Integration tests
 
 ```bash
 cd backend
-python test_full_flow.py
+python test_full_flow.py        # Team upload + judge download end-to-end test
+python test_judge_auth_scenarios.py  # 18-scenario HEAD_JUDGE/authorization test suite
 ```
 
-This is the principal test command. It exercises the live API against running servers and covers the following AGENTS.md categories:
-
-| AGENTS.md required area | Covered by `test_full_flow.py` |
-|-------------------------|--------------------------------|
-| Authentication | ✅ Team + judge login (`/auth/login`), JWT returned |
-| Team uploads | ✅ Team uploads a file to a submission |
-| Judge assignment | ✅ Judge sees only assigned submissions |
-| Scoring / evaluation | ⚠️ Not asserted in script (manual via judge dashboard) |
-| Authorized file download | ✅ Judge downloads the uploaded file (200 + `Content-Disposition`) |
-| Invalid / unauthorized requests | ⚠️ Partial (relies on server-side role checks; no explicit negative test) |
-| Database migrations | ⚠️ Not covered (run `alembic upgrade head` separately) |
-| Admin workflows | ⚠️ Not covered (manual via admin UI/API) |
-
-Run it from `backend/` with **both** the backend (`uvicorn app.main:app --host 127.0.0.1 --port 8022`) and frontend (`npm run dev`) running. It prints the login result, upload metadata (`version`, `submitted_at`), and the download result.
-
-### Other verification scripts
-
-```bash
-cd backend
-python check_db.py          # Verifies the submission_files schema (submitted_at column)
-```
+Both scripts exercise the live API against running servers. Run with backend at `http://127.0.0.1:8022`.
 
 ### Seeding
 
 ```bash
 cd backend
-python setup_55_teams.py
+SEED_DEV=1 python setup_55_teams.py
 ```
 
-Wipes and re-seeds the database with 55 teams, 5 judges, 1 admin, and 3 competitions.
+Wipes and re-seeds the database with 55 teams, 5 judges (judge1=HEAD_JUDGE), 1 admin, and 3 competitions. Requires `SEED_DEV=1` environment variable as a safety guard.
 
 ### TODO
 

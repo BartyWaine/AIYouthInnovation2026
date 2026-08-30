@@ -9,14 +9,22 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const token = localStorage.getItem('token')
-    if (token) {
-      getMe().then(setUser).catch(() => localStorage.removeItem('token')).finally(() => setLoading(false))
-    } else {
+    if (!token) {
       setLoading(false)
+      return
     }
+    let cancelled = false
+    getMe()
+      .then(u => { if (!cancelled) setUser(u) })
+      .catch(() => { if (!cancelled) { localStorage.removeItem('token'); setUser(null) } })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [])
 
-  const logout = () => { apiLogout(); setUser(null) }
+  const logout = () => {
+    localStorage.removeItem('token')
+    setUser(null)
+  }
 
   return (
     <AuthContext.Provider value={{ user, setUser, loading, logout }}>

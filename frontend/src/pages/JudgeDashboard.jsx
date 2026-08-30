@@ -14,29 +14,7 @@ import {
   listMyEvaluations,
   getJudgeAllSubmissions,
 } from '../api/judges'
-
-const FILE_ICONS = {
-  '.docx': '📄',
-  '.pdf': '📄',
-  '.pptx': '📊',
-  '.zip': '📦',
-  '.mp4': '🎥',
-  '.png': '🖼️',
-  '.jpg': '🖼️',
-  '.jpeg': '🖼️',
-}
-
-function getFileIcon(filename) {
-  const ext = '.' + filename.split('.').pop().toLowerCase()
-  return FILE_ICONS[ext] || '📎'
-}
-
-function formatFileSize(bytes) {
-  if (!bytes) return '0 B'
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-}
+import { getFileIcon, formatFileSize } from '../utils'
 
 export default function JudgeDashboard() {
   const navigate = useNavigate()
@@ -51,6 +29,8 @@ export default function JudgeDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeTab, setActiveTab] = useState('files')
+  const [searchTeam, setSearchTeam] = useState('')
+  const [localScores, setLocalScores] = useState({})
 
   useEffect(() => {
     loadData()
@@ -81,6 +61,13 @@ export default function JudgeDashboard() {
       setCriteria(critData)
       setEvaluations(evalData)
       setScores(scoreData)
+      const initScores = {}
+      for (const ev of evalData) {
+        for (const sc of (ev.scores || [])) {
+          initScores[`${ev.team_id}-${sc.criterion_id}`] = sc.score
+        }
+      }
+      setLocalScores(initScores)
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to load dashboard')
     } finally {
@@ -124,6 +111,9 @@ export default function JudgeDashboard() {
     teams[sub.team_id].submissions.push(sub)
   })
   const teamList = Object.entries(teams)
+  const filteredTeams = searchTeam
+    ? teamList.filter(([teamId]) => String(teamId) === String(searchTeam))
+    : teamList
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -205,7 +195,7 @@ export default function JudgeDashboard() {
                                 </div>
                               </div>
                               <button
-                                onClick={() => downloadFile(sub.submission_id, f.id, f.original_filename)}
+                                onClick={() => downloadFile(sub.submission_id, f.id, f.original_filename).catch(err => setError(err.message))}
                                 className="px-3 py-1 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700"
                               >
                                 Download
@@ -227,11 +217,31 @@ export default function JudgeDashboard() {
 
       {activeTab === 'scores' && (
         <>
-          <p className="text-gray-500 mb-4">Score teams and view results</p>
+          <div className="flex gap-3 mb-4 items-center">
+            <label className="text-sm font-medium text-gray-700">Go to Team ID:</label>
+            <input
+              type="number"
+              min="1"
+              placeholder="Enter team ID"
+              value={searchTeam}
+              onChange={e => setSearchTeam(e.target.value)}
+              className="w-40 px-3 py-1 border rounded text-sm"
+            />
+            {searchTeam && (
+              <button
+                onClick={() => setSearchTeam('')}
+                className="text-sm text-indigo-600 hover:underline"
+              >
+                Clear
+              </button>
+            )}
+          </div>
           {teamList.length === 0 ? (
             <p className="text-gray-500">No teams to score.</p>
+          ) : filteredTeams.length === 0 ? (
+            <p className="text-gray-500">No team found with ID "{searchTeam}".</p>
           ) : (
-            teamList.map(([teamId, team]) => {
+            filteredTeams.map(([teamId, team]) => {
               const scoreData = getScoreForTeam(teamId)
               const evaluation = getEvaluationForTeam(teamId)
               return (
@@ -253,18 +263,20 @@ export default function JudgeDashboard() {
                      {criteria.map(c => {
                       const existing = evaluation?.scores?.find(s => s.criterion === c.name)?.score
                       const savedScore = existing !== undefined ? existing : c.weight
+                      const localKey = `${teamId}-${c.id}`
+                      const displayValue = localScores[localKey] !== undefined ? localScores[localKey] : savedScore
                       return (
                         <div key={c.id} className="border p-3 rounded">
                           <label className="block text-sm font-medium mb-1">{c.name}</label>
                           <div className="flex items-center gap-2">
-                             <input
-                               key={`score-${teamId}-${c.id}-${evaluation?.id || 'none'}-${existing}`}
+                              <input
                                type="number"
                                min="0"
                                max={c.weight}
-                               step="0.5"
-                               defaultValue={savedScore}
-                              onBlur={(e) => {
+                               step="1"
+                               value={displayValue}
+                              onChange={e => setLocalScores(prev => ({ ...prev, [localKey]: parseFloat(e.target.value) || 0 }))}
+                              onBlur={e => {
                                 const score = parseFloat(e.target.value)
                                 if (!isNaN(score)) handleScoreSubmit(teamId, c.id, score, '')
                               }}

@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from ..database import SessionLocal
+from ..database import get_db
 from .. import models
 from ..security import get_current_user, require_role
 
@@ -17,14 +17,6 @@ router = APIRouter(prefix="/deliverables", tags=["submissions"])
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
 ALLOWED_EXTENSIONS = {".docx", ".pdf", ".pptx", ".zip", ".mp4", ".png", ".jpg", ".jpeg"}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB per file
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def _authorize_submission_access(db: Session, user: models.User, submission: models.Submission):
@@ -48,7 +40,7 @@ def _authorize_submission_access(db: Session, user: models.User, submission: mod
                 detail="Not authorized to access this submission",
             )
         return
-    if role == "JUDGE":
+    if role in ("JUDGE", "HEAD_JUDGE"):
         judge = db.query(models.Judge).filter(models.Judge.user_id == user.id).first()
         if not judge:
             raise HTTPException(
@@ -171,6 +163,9 @@ def list_submissions(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    deliverable = db.get(models.Deliverable, deliverable_id)
+    if not deliverable:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deliverable not found")
     submissions = db.query(models.Submission).filter(models.Submission.deliverable_id == deliverable_id).all()
     result = []
     for sub in submissions:
@@ -383,9 +378,11 @@ def download_file(
 def list_competition_submissions(
     competition_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_role('JUDGE')),
+    current_user: models.User = Depends(get_current_user),
 ):
     """List all submissions (with files) for all teams in a competition that the judge is assigned to."""
+    if current_user.role.value not in ("JUDGE", "HEAD_JUDGE", "ADMIN"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Judge or Admin only")
     judge = db.query(models.Judge).filter(models.Judge.user_id == current_user.id).first()
     if not judge:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not a judge")

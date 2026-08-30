@@ -10,7 +10,8 @@ export default function Dashboard() {
   useEffect(() => { listCompetitions().then(setCompetitions).catch(() => {}) }, [])
 
   const isTeamMember = user?.role === 'TEAM_MEMBER' || user?.role === 'TEAM_LEADER'
-  const isJudge = user?.role === 'JUDGE'
+  const isJudge = user?.role === 'JUDGE' || user?.role === 'HEAD_JUDGE'
+  const isHeadJudge = user?.role === 'HEAD_JUDGE'
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -21,6 +22,7 @@ export default function Dashboard() {
         <div className="bg-white p-6 rounded-lg shadow"><p className="text-3xl font-bold text-green-600">{user?.role}</p><p className="text-gray-500">Your Role</p></div>
         {isTeamMember && <div className="bg-white p-6 rounded-lg shadow"><Link to="/uploads" className="text-indigo-600 hover:underline font-semibold">Go to My Uploads &rarr;</Link></div>}
         {isJudge && <div className="bg-white p-6 rounded-lg shadow"><Link to="/judge-dashboard" className="text-indigo-600 hover:underline font-semibold">Go to Judge Dashboard &rarr;</Link></div>}
+            {isHeadJudge && <div className="bg-white p-6 rounded-lg shadow"><Link to="/head-judge-dashboard" className="text-indigo-600 hover:underline font-semibold">Head Judge Dashboard &rarr;</Link></div>}
         <div className="bg-white p-6 rounded-lg shadow"><Link to="/competitions" className="text-indigo-600 hover:underline font-semibold">View Competitions &rarr;</Link></div>
       </div>
       <h2 className="text-xl font-semibold mb-4">Competitions</h2>

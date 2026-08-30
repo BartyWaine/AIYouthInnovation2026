@@ -14,11 +14,22 @@ import TeamDetail from './pages/TeamDetail'
 import CompetitionTeams from './pages/CompetitionTeams'
 import TeamUploads from './pages/TeamUploads'
 import JudgeDashboard from './pages/JudgeDashboard'
+import HeadJudgeDashboard from './pages/HeadJudgeDashboard'
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth()
   if (loading) return <div className="p-6">Loading...</div>
   return user ? children : <Navigate to="/login" />
+}
+
+function RoleRoute({ children, allowedRoles }) {
+  const { user, loading } = useAuth()
+  if (loading) return <div className="p-6">Loading...</div>
+  if (!user) return <Navigate to="/login" />
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    return <Navigate to="/dashboard" />
+  }
+  return children
 }
 
 function AppRoutes() {
@@ -31,15 +42,16 @@ function AppRoutes() {
           <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
           <Route path="/competitions" element={<PrivateRoute><AdminCompetitions /></PrivateRoute>} />
           <Route path="/competitions/:id" element={<PrivateRoute><CompetitionDetail /></PrivateRoute>} />
-          <Route path="/competitions/:compId/deliverables" element={<PrivateRoute><Deliverables /></PrivateRoute>} />
+          <Route path="/competitions/:compId/deliverables" element={<RoleRoute allowedRoles={['ADMIN']}><Deliverables /></RoleRoute>} />
           <Route path="/competitions/:compId/teams" element={<PrivateRoute><CompetitionTeams /></PrivateRoute>} />
           <Route path="/teams" element={<PrivateRoute><AdminTeams /></PrivateRoute>} />
           <Route path="/teams/:id" element={<PrivateRoute><TeamDetail /></PrivateRoute>} />
           <Route path="/uploads" element={<PrivateRoute><TeamUploads /></PrivateRoute>} />
-          <Route path="/judge-dashboard" element={<PrivateRoute><JudgeDashboard /></PrivateRoute>} />
-          <Route path="/users" element={<PrivateRoute><AdminUsers /></PrivateRoute>} />
-          <Route path="/judges" element={<PrivateRoute><JudgeManagement /></PrivateRoute>} />
-          <Route path="/audit-logs" element={<PrivateRoute><AuditLogs /></PrivateRoute>} />
+          <Route path="/judge-dashboard" element={<RoleRoute allowedRoles={['JUDGE', 'HEAD_JUDGE']}><JudgeDashboard /></RoleRoute>} />
+          <Route path="/head-judge-dashboard" element={<RoleRoute allowedRoles={['HEAD_JUDGE']}><HeadJudgeDashboard /></RoleRoute>} />
+          <Route path="/users" element={<RoleRoute allowedRoles={['ADMIN']}><AdminUsers /></RoleRoute>} />
+          <Route path="/judges" element={<RoleRoute allowedRoles={['ADMIN']}><JudgeManagement /></RoleRoute>} />
+          <Route path="/audit-logs" element={<RoleRoute allowedRoles={['ADMIN', 'HEAD_JUDGE']}><AuditLogs /></RoleRoute>} />
           <Route path="/" element={<Navigate to="/dashboard" />} />
         </Routes>
       </div>

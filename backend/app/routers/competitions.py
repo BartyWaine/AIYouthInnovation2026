@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from ..database import SessionLocal
+from ..database import get_db
 from .. import models
 from ..models import CompetitionCategory
 from ..security import get_current_user, require_role
@@ -11,14 +11,6 @@ router = APIRouter(prefix="/competitions", tags=["competitions"])
 class CompetitionCreate(BaseModel):
     name: str
     category: CompetitionCategory
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 @router.get("/")
@@ -107,8 +99,21 @@ def list_competition_teams(competition_id: int, db: Session = Depends(get_db), c
 
 @router.get("/{competition_id}/leaderboard")
 def leaderboard(competition_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    if current_user.role == models.UserRole.TEAM_MEMBER:
+        raise HTTPException(status_code=403, detail="Not authorized")
     comp = db.get(models.Competition, competition_id)
     if not comp:
         raise HTTPException(status_code=404, detail="Competition not found")
     results = db.query(models.Team.id, models.Team.name, func.coalesce(func.sum(models.EvaluationScore.score), 0).label("total"), func.count(models.EvaluationScore.id).label("num")).outerjoin(models.Evaluation, models.Evaluation.team_id == models.Team.id).outerjoin(models.EvaluationScore, models.EvaluationScore.evaluation_id == models.Evaluation.id).filter(models.Team.competition_id == competition_id).group_by(models.Team.id, models.Team.name).order_by(func.coalesce(func.sum(models.EvaluationScore.score), 0).desc()).all()
     return [{"rank": i+1, "team_id": r[0], "team_name": r[1], "total_score": float(r[2]), "num_scores": r[3]} for i, r in enumerate(results)]
+
+
+@router.get("/{competition_id}/rankings")
+def rankings(competition_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    if current_user.role == models.UserRole.TEAM_MEMBER:
+        raise HTTPException(status_code=403, detail="Not authorized to view rankings detail")
+    comp = db.get(models.Competition, competition_id)
+    if not comp:
+        raise HTTPException(status_code=404, detail="Competition not found")
+    results = db.query(models.Team.id, models.Team.name, func.coalesce(func.sum(models.EvaluationScore.score), 0).label("total")).outerjoin(models.Evaluation, models.Evaluation.team_id == models.Team.id).outerjoin(models.EvaluationScore, models.EvaluationScore.evaluation_id == models.Evaluation.id).filter(models.Team.competition_id == competition_id).group_by(models.Team.id, models.Team.name).order_by(func.coalesce(func.sum(models.EvaluationScore.score), 0).desc()).all()
+    return [{"rank": i+1, "team_id": r[0], "team_name": r[1]} for i, r in enumerate(results)]

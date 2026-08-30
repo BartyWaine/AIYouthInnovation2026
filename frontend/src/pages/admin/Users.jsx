@@ -51,16 +51,16 @@ export default function AdminUsers() {
              <td className="p-3">{u.email}</td>
              <td className="p-3"><span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded text-xs font-medium">{u.role}</span></td>
              <td className="p-3">
-               <button onClick={async () => {
-                 if (window.confirm(`Reset password for ${u.email} to default123?`)) {
-                   try {
-                     await resetPassword(u.id)
-                     alert(`Password reset for ${u.email}. New password: default123`)
-                   } catch (err) {
-                     alert(err.response?.data?.detail || 'Reset failed')
-                   }
-                 }
-               }} className="text-red-600 hover:text-red-800 text-xs px-2 py-1 border border-red-200 rounded">Reset PW</button>
+                <button onClick={async () => {
+                  if (window.confirm(`Reset password for ${u.email}?`)) {
+                    try {
+                      await resetPassword(u.id)
+                      alert(`Password reset for ${u.email}.`)
+                    } catch (err) {
+                      alert(err.response?.data?.detail || 'Reset failed')
+                    }
+                  }
+                }} className="text-red-600 hover:text-red-800 text-xs px-2 py-1 border border-red-200 rounded">Reset PW</button>
              </td>
            </tr>
          ))}</tbody>

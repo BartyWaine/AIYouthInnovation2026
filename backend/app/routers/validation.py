@@ -1,18 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from ..database import SessionLocal
+from ..database import get_db
 from .. import models
 from ..security import get_current_user, require_role
 
 router = APIRouter(prefix="/validation", tags=["validation"])
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 @router.post("/submissions/{submission_id}/validate")
 def validate_submission(

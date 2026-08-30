@@ -1,29 +1,8 @@
 import { useEffect, useState } from 'react'
 import { getMyTeam, getMyTeamSubmissions } from '../api/teams'
 import { listDeliverables, createSubmission, addFile, getSubmissionFiles, downloadFile } from '../api/deliverables'
-
-const FILE_ICONS = {
-  '.docx': '📄',
-  '.pdf': '📄',
-  '.pptx': '📊',
-  '.zip': '📦',
-  '.mp4': '🎥',
-  '.png': '🖼️',
-  '.jpg': '🖼️',
-  '.jpeg': '🖼️',
-}
-
-function getFileIcon(filename) {
-  const ext = '.' + filename.split('.').pop().toLowerCase()
-  return FILE_ICONS[ext] || '📎'
-}
-
-function formatFileSize(bytes) {
-  if (!bytes) return '0 B'
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-}
+import { getRankings } from '../api/competitions'
+import { getFileIcon, formatFileSize } from '../utils'
 
 export default function TeamUploads() {
   const [team, setTeam] = useState(null)
@@ -33,6 +12,17 @@ export default function TeamUploads() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState({})
   const [error, setError] = useState('')
+  const [activeTab, setActiveTab] = useState('uploads')
+  const [rankings, setRankings] = useState([])
+
+  const loadRankings = async (compId) => {
+    try {
+      const data = await getRankings(compId)
+      setRankings(data)
+    } catch {
+      setRankings([])
+    }
+  }
 
   const load = async () => {
     setLoading(true)
@@ -53,6 +43,7 @@ export default function TeamUploads() {
         }
       }
       setFiles(filesMap)
+      await loadRankings(myTeam.competition_id)
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to load upload page')
     } finally {
@@ -113,8 +104,50 @@ export default function TeamUploads() {
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-2">Team Uploads</h1>
-      <p className="text-gray-500 mb-6">Team: {team.name} | Competition ID: {team.competition_id}</p>
+      <p className="text-gray-500 mb-4">Team: {team.name} | Competition ID: {team.competition_id}</p>
 
+      <div className="flex gap-2 mb-6">
+        <button
+          onClick={() => setActiveTab('uploads')}
+          className={`px-4 py-2 rounded text-sm ${activeTab === 'uploads' ? 'bg-indigo-600 text-white' : 'bg-gray-200'}`}
+        >
+          Uploads
+        </button>
+        <button
+          onClick={() => setActiveTab('rankings')}
+          className={`px-4 py-2 rounded text-sm ${activeTab === 'rankings' ? 'bg-indigo-600 text-white' : 'bg-gray-200'}`}
+        >
+          Rankings
+        </button>
+      </div>
+
+      {activeTab === 'rankings' && (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <table className="w-full text-left">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="p-3 text-center">Rank</th>
+                <th className="p-3">Team</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rankings.length === 0 ? (
+                <tr><td colSpan="2" className="p-4 text-center text-gray-500">No rankings available yet.</td></tr>
+              ) : rankings.map(r => (
+                <tr key={r.team_id} className={`border-t ${r.team_id === team.id ? 'bg-indigo-50' : ''}`}>
+                  <td className="p-3 text-center font-bold">{r.rank}</td>
+                  <td className="p-3">
+                    {r.team_name}
+                    {r.team_id === team.id && <span className="ml-2 text-xs text-indigo-600 font-semibold">(Your Team)</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {activeTab === 'uploads' && (
       <div className="space-y-6">
         {deliverables.map(d => {
           const sub = getSubmissionForDeliverable(d.id)
@@ -145,7 +178,7 @@ export default function TeamUploads() {
                         </span>
                       </div>
                         <button
-                          onClick={() => downloadFile(sub.id, f.id, f.original_filename)}
+                          onClick={() => downloadFile(sub.id, f.id, f.original_filename).catch(err => setError(err.message || 'Download failed'))}
                           className="text-indigo-600 hover:text-indigo-800 text-xs px-2 py-1 border border-indigo-200 rounded"
                         >Download</button>
                       <div className="flex flex-col items-end text-xs text-gray-400">
@@ -177,7 +210,8 @@ export default function TeamUploads() {
             </div>
           )
         })}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

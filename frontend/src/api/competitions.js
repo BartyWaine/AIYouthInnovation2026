@@ -5,3 +5,4 @@ export const getCompetition = (id) => api.get(`/competitions/${id}`).then(r => r
 export const createCompetition = (data) => api.post('/competitions/', data).then(r => r.data)
 export const deleteCompetition = (id) => api.delete(`/competitions/${id}`).then(r => r.data)
 export const getLeaderboard = (id) => api.get(`/competitions/${id}/leaderboard`).then(r => r.data)
+export const getRankings = (id) => api.get(`/competitions/${id}/rankings`).then(r => r.data)

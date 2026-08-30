@@ -2,19 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from ..database import SessionLocal
+from ..database import get_db
 from .. import models
 from ..security import get_current_user, get_password_hash, require_role
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def require_admin(current_user: models.User = Depends(get_current_user)):

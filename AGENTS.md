@@ -69,16 +69,22 @@ Document and, where feasible, implement tests for:
 - admin workflows;
 - team uploads;
 - judge assignment;
-- scoring and evaluation;
+- scoring and evaluation (including HEAD_JUDGE correction workflow);
 - authorized and unauthorized file downloads;
-- invalid or unauthorized requests;
-- database migrations.
+- invalid or unauthorized requests (including role-based access: JUDGE vs HEAD_JUDGE vs ADMIN);
+- database migrations;
+- evaluation status transitions (OPEN → SUBMITTED → LOCKED → FINALIZED, and reopen path);
+- audit log completeness (every correction stores old_value, new_value, reason, actor_role).
 
 If tests exist in `tests/`, document the exact command to run them. Run the principal test command and report:
 
 - the exact command;
 - the number of passed, failed, and skipped tests;
 - important warnings or known limitations.
+
+Current test commands:
+- `cd backend && python test_full_flow.py` — team upload + judge download end-to-end
+- `cd backend && python test_judge_auth_scenarios.py` — 18-scenario HEAD_JUDGE authorization suite (20/20 passing)
 
 ## Production deployment requirements
 

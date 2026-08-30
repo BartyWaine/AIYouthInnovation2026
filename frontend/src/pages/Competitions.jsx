@@ -6,12 +6,15 @@ import { useAuth } from '../context/AuthContext'
 export function CompetitionDetail() {
   const { id } = useParams()
   const { user } = useAuth()
+  const isTeamMember = user?.role === 'TEAM_MEMBER' || user?.role === 'TEAM_LEADER'
   const [comp, setComp] = useState(null)
   const [board, setBoard] = useState([])
 
   useEffect(() => {
     getCompetition(id).then(setComp)
-    getLeaderboard(id).then(setBoard).catch(() => {})
+    if (!isTeamMember) {
+      getLeaderboard(id).then(setBoard).catch(() => {})
+    }
   }, [id])
 
   if (!comp) return <div className="p-6">Loading...</div>
@@ -29,8 +32,8 @@ export function CompetitionDetail() {
         <Link to={`/competitions/${id}/teams`} className="bg-white p-4 rounded-lg shadow text-center hover:bg-indigo-50"><p className="text-indigo-600 font-semibold">View Teams &rarr;</p></Link>
       </div>
 
-      <h2 className="text-xl font-semibold mb-4">Leaderboard</h2>
-      {board.length === 0 ? <p className="text-gray-400">No scores yet</p> : (
+      {!isTeamMember && board.length === 0 && <p className="text-gray-400">No scores yet</p>}
+      {!isTeamMember && board.length > 0 && (
         <div className="bg-white rounded-lg shadow overflow-hidden">
           <table className="w-full text-left">
             <thead className="bg-gray-50"><tr><th className="p-3">Rank</th><th className="p-3">Team</th><th className="p-3">Score</th><th className="p-3">Evaluations</th></tr></thead>

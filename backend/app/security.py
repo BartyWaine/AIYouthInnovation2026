@@ -13,7 +13,13 @@ from sqlalchemy.orm import Session
 from .database import SessionLocal
 from . import models
 
-SECRET_KEY = os.getenv("JWT_SECRET", "dev-secret-change-me")
+SECRET_KEY = os.getenv("JWT_SECRET")
+if SECRET_KEY is None:
+    if os.getenv("ENVIRONMENT") == "production":
+        raise RuntimeError("JWT_SECRET environment variable must be set in production.")
+    import warnings
+    warnings.warn("JWT_SECRET not set — using insecure fallback. Set JWT_SECRET env var in production.")
+    SECRET_KEY = "dev-secret-insecure-fallback-only"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_SECONDS = 60 * 60 * 24
 

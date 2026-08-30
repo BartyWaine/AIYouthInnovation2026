@@ -1,6 +1,15 @@
-"""Setup script to load 55 real teams into the database."""
+"""Setup script to load 55 real teams into the database.
+SAFE FOR DEVELOPMENT ONLY — requires SEED_DEV=1 environment variable.
+Never run this against a production database.
+"""
 import sys
+import os
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
+if os.getenv("SEED_DEV") != "1":
+    print("ERROR: This script is for development only.")
+    print("Set SEED_DEV=1 to run. Aborting.")
+    sys.exit(1)
 
 from app.database import SessionLocal
 from app.models import (
@@ -11,20 +20,73 @@ from app.models import (
 from app.security import get_password_hash
 from app.models import DeliverableCategory
 from collections import Counter
+from sqlalchemy import inspect as _sqlainspect, text as _text
 
 db = SessionLocal()
 
-# === 0. Ensure submitted_at column exists ===
-from sqlalchemy import inspect, text
-insp = inspect(db.bind)
-cols = [c['name'] for c in insp.get_columns('submission_files')]
+# === 0. Create admin and judge users (idempotent — only creates if not exists) ===
+pw_hash = get_password_hash("admin123")
+admin = db.query(User).filter(User.email == "admin@sti.edu.mm").first()
+if not admin:
+    admin = User(email="admin@sti.edu.mm", password_hash=pw_hash, role=UserRole.ADMIN)
+    db.add(admin)
+    db.commit()
+    db.refresh(admin)
+    print(f"Created admin: admin@sti.edu.mm")
+else:
+    print(f"Admin exists: admin@sti.edu.mm (id={admin.id})")
+
+for i in range(1, 6):
+    email = f"judge{i}@sti.edu.mm"
+    role = UserRole.HEAD_JUDGE if i == 1 else UserRole.JUDGE
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        user = User(email=email, password_hash=get_password_hash("judge123"), role=role)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        print(f"Created {email} -> {role.value} (id={user.id})")
+    else:
+        user.role = role
+        db.add(user)
+        db.commit()
+        print(f"Updated {email} -> {role.value}")
+    judge_row = db.query(Judge).filter(Judge.user_id == user.id).first()
+    if not judge_row:
+        judge_row = Judge(user_id=user.id)
+        db.add(judge_row)
+        db.commit()
+        db.refresh(judge_row)
+        print(f"  Created Judge row: id={judge_row.id}")
+
+# === 1. Ensure submitted_at column exists (for existing DBs) ===
+cols = [c['name'] for c in _sqlainspect(db.bind).get_columns('submission_files')]
 if 'submitted_at' not in cols:
-    db.execute(text("ALTER TABLE submission_files ADD COLUMN submitted_at DATETIME"))
+    db.execute(_text("ALTER TABLE submission_files ADD COLUMN submitted_at DATETIME"))
     db.commit()
     print("Added submitted_at column")
 
-# === 1. Clean up ALL data ===
-print("=== Cleaning up ===")
+# === 1. Ensure 3 competitions exist (create if empty DB) ===
+competitions = db.query(Competition).all()
+if not competitions:
+    print("Creating competitions...")
+    comp1 = Competition(name="AI Youth 2026", category="AI for Engineering and Technology")
+    comp2 = Competition(name="AI Youth 2026_Social", category="AI for Social Innovation")
+    comp3 = Competition(name="AI Youth 2026_Entrepreneur", category="AI for Entrepreneurship")
+    db.add_all([comp1, comp2, comp3])
+    db.commit()
+    competitions = db.query(Competition).all()
+
+for comp in competitions:
+    existing_cats = {d.category for d in db.query(Deliverable).filter(Deliverable.competition_id == comp.id).all() if d.category is not None}
+    for cat in DeliverableCategory:
+        if cat.value not in existing_cats:
+            db.add(Deliverable(competition_id=comp.id, name=cat.value, category=cat))
+    db.commit()
+print(f"Competitions: {[(c.id, c.name, c.category) for c in competitions]}")
+
+# === 2. Clean up ALL data (preserve judge/admin users) ===
+print("\n=== Cleaning up ===")
 for model in [EvaluationScore, Evaluation, SubmissionFile, Submission,
               JudgeAssignment, TeamMember, AuditLog]:
     for row in db.query(model).all():
@@ -39,30 +101,12 @@ for u in db.query(User).filter(User.role == UserRole.TEAM_MEMBER).all():
     db.delete(u)
 db.commit()
 
-admin_judge = db.query(Judge).filter(Judge.user_id == 1).first()
-if admin_judge:
-    db.delete(admin_judge)
-    db.commit()
 print("Cleanup complete")
 
-# === 2. Verify existing data ===
-competitions = db.query(Competition).all()
-print(f"Competitions: {[(c.id, c.name, c.category) for c in competitions]}")
+# === 3. Build comp_deliverables map ===
+comp_deliverables = {c.id: db.query(Deliverable).filter(Deliverable.competition_id == c.id).all() for c in competitions}
 
-judges = db.query(Judge).all()
-print(f"Judges: {[(j.id, j.user_id) for j in judges]}")
-
-# Ensure standard deliverables
-for comp in competitions:
-    existing_cats = {d.category for d in db.query(Deliverable).filter(Deliverable.competition_id == comp.id).all() if d.category is not None}
-    for cat in DeliverableCategory:
-        if cat.value not in existing_cats:
-            db.add(Deliverable(competition_id=comp.id, name=cat.value, category=cat))
-    db.commit()
-    delivs = db.query(Deliverable).filter(Deliverable.competition_id == comp.id).all()
-    print(f"  Comp {comp.id} ({comp.name}): {len(delivs)} deliverables")
-
-# === 3. Team data (55 teams) ===
+# === 5. Create 55 teams ===
 TEAM_DATA = [
     ("Technologia Ventures", "ConceptX International School", "AI Entrepreneurship", "Htet Shwe Sin"),
     ("BlueNode", "Yangon Education Creation Corner (YECC)", "AI for Social Innovation", "Zay Thuya Oo, Chan Myae Thaw, Zwe Khant Oo"),
@@ -91,7 +135,7 @@ TEAM_DATA = [
     ("Synapse", "IIP International School", "AI for Social Innovation", "Yoon Mo Mo Eaim @ Laura, Htet Kyaw Lwin @ Felix"),
     ("NeuraNova", "OiAC Private School", "AI for Social Innovation", "May Myat Thu, Yu Shwe Yi Hlaing"),
     ("Hsu-Data-Divas", "B.E.H.S(1) Letpadan", "AI for Social Innovation", "Hsu Luck Pyae, Hsu Pyae Sone"),
-    ("အထက်ကက္ကြောင်း ပင်းတယ", "အ၊ထ၊က ၁ ပင်းတယ", "AI Technology & Engineering", "Lat Yar Bo, Mya Hnin Khaing, Kyal Sin Lin Let"),
+    ("\u101e\u1004\u103b\u1038\u1040\u1030\u1014\u103e\u1005\u101b\u1038 \u1015\u103c\u102f\u101b\u1031\u102c\u103a", "\u101e\u101c\u1001\u102c\u1000 ၁ \u1015\u103c\u102f\u101b\u1031\u102c\u103a", "AI Technology & Engineering", "Lat Yar Bo, Mya Hnin Khaing, Kyal Sin Lin Let"),
     ("THINN", "B.E.H.S (2) Sittwe", "AI for Social Innovation", "Thinn Thinn Hlaing"),
     ("Team GBK", "B.E.H.S (Branch) Thabyubin", "AI Technology & Engineering", "Shine Htet Aung, Ayar Swam Htet Paing"),
     ("Chan Nyein Kyal Sin", "B.E.H.S 1 Dagon", "AI Entrepreneurship", "Chan Nyein Kyal Sin, Hsu Lei Phyu, Thuta Aung Myo Htun"),
@@ -129,10 +173,6 @@ CAT_TO_COMP = {
     "AI for Entrepreneurship": 3,
 }
 
-comp_deliverables = {}
-for comp in competitions:
-    comp_deliverables[comp.id] = db.query(Deliverable).filter(Deliverable.competition_id == comp.id).all()
-
 print(f"\n=== Creating {len(TEAM_DATA)} teams ===")
 for i, (team_name, school, cat_str, participants) in enumerate(TEAM_DATA):
     comp_id = CAT_TO_COMP.get(cat_str, 1)
@@ -157,9 +197,9 @@ for i, (team_name, school, cat_str, participants) in enumerate(TEAM_DATA):
 
 print(f"Created {len(TEAM_DATA)} teams")
 
-# === 4. Assign judges ===
+# === 6. Assign all judges to all teams ===
 print(f"\n=== Assigning judges ===")
-judges = db.query(Judge).filter(Judge.user_id != 1).all()
+judges = db.query(Judge).all()
 all_teams = db.query(Team).all()
 print(f"Judges: {len(judges)}, Teams: {len(all_teams)}")
 
@@ -182,12 +222,13 @@ for judge in judges:
 total_assign = db.query(JudgeAssignment).count()
 print(f"Total judge assignments: {total_assign}")
 
-# === 5. Summary ===
+# === 7. Summary ===
 print("\n=== FINAL SUMMARY ===")
 print(f"Users: {db.query(User).count()}")
 print(f"  Admin: {db.query(User).filter(User.role == UserRole.ADMIN).count()}")
-print(f"  Team accounts (1 per team): {db.query(User).filter(User.role == UserRole.TEAM_MEMBER).count()}")
+print(f"  Head Judge: {db.query(User).filter(User.role == UserRole.HEAD_JUDGE).count()}")
 print(f"  Judges: {db.query(User).filter(User.role == UserRole.JUDGE).count()}")
+print(f"  Team accounts (1 per team): {db.query(User).filter(User.role == UserRole.TEAM_MEMBER).count()}")
 print(f"Teams: {db.query(Team).count()}")
 print(f"Submissions: {db.query(Submission).count()}")
 print(f"Judge assignments: {db.query(JudgeAssignment).count()}")
@@ -197,7 +238,6 @@ for comp_id, count in sorted(comp_counts.items()):
     deliv_count = len(comp_deliverables[comp_id])
     print(f"  Competition {comp_id}: {count} teams, {deliv_count} deliverables, {count * deliv_count} submissions")
 
-# Count by category
 cat_counts = Counter()
 for team_name, school, cat_str, _ in TEAM_DATA:
     cat_counts[cat_str] += 1
@@ -205,7 +245,9 @@ print("\nTeams by category:")
 for cat, count in cat_counts.most_common():
     print(f"  {cat}: {count}")
 
-print("\nAll 5 judges: judge1@sti.edu.mm through judge5@sti.edu.mm / judge123")
+print("\nJudge accounts:")
+print("  Judge1 (HEAD_JUDGE): judge1@sti.edu.mm / judge123")
+print("  Judges 2-5 (JUDGE):  judge2@sti.edu.mm through judge5@sti.edu.mm / judge123")
 print("All 55 team accounts: team1@sti.edu.mm through team55@sti.edu.mm / team123")
 print("Done!")
 

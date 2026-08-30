@@ -1,5 +1,5 @@
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
@@ -30,12 +30,20 @@ class UserRole(str, Enum):
     ADMIN = "ADMIN"
     JUDGE = "JUDGE"
     LECTURER = "LECTURER"
+    HEAD_JUDGE = "HEAD_JUDGE"
 
 class CompetitionCategory(str, Enum):
     ENGINEERING = "AI for Engineering and Technology"
     SOCIAL = "AI for Social Innovation"
     ENTREPRENEURSHIP = "AI for Entrepreneurship"
 
+
+
+class EvaluationStatus(str, Enum):
+    OPEN = "OPEN"
+    SUBMITTED = "SUBMITTED"
+    LOCKED = "LOCKED"
+    FINALIZED = "FINALIZED"
 
 
 class SubmissionStatus(str, Enum):
@@ -89,13 +97,13 @@ class User(Base):
 
     created_at = Column(
         DateTime,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
 
     updated_at = Column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     # Relationships
@@ -112,6 +120,7 @@ class User(Base):
 
     audit_logs = relationship(
         "AuditLog",
+        foreign_keys="AuditLog.user_id",
         back_populates="user",
     )
 
@@ -157,13 +166,13 @@ class Competition(Base):
 
     created_at = Column(
         DateTime,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
 
     updated_at = Column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     # Relationships
@@ -214,13 +223,13 @@ class Team(Base):
 
     created_at = Column(
         DateTime,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
 
     updated_at = Column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     competition = relationship(
@@ -284,7 +293,7 @@ class TeamMember(Base):
 
     created_at = Column(
         DateTime,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
 
     team = relationship(
@@ -358,7 +367,7 @@ class Deliverable(Base):
 
     created_at = Column(
         DateTime,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
 
     competition = relationship(
@@ -418,13 +427,13 @@ class Submission(Base):
 
     created_at = Column(
         DateTime,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
 
     updated_at = Column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     deliverable = relationship(
@@ -497,12 +506,12 @@ class SubmissionFile(Base):
 
     uploaded_at = Column(
         DateTime,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
 
     submitted_at = Column(
         DateTime,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
 
     version = Column(
@@ -546,7 +555,7 @@ class Judge(Base):
 
     created_at = Column(
         DateTime,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
 
     user = relationship(
@@ -598,7 +607,7 @@ class JudgeAssignment(Base):
 
     assigned_at = Column(
         DateTime,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
 
     assigned_by = Column(
@@ -693,9 +702,21 @@ class Evaluation(Base):
         nullable=False,
     )
 
+    status = Column(
+        SqlEnum(EvaluationStatus, native_enum=False),
+        nullable=False,
+        default=EvaluationStatus.OPEN,
+    )
+
     created_at = Column(
         DateTime,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
 
     judge = relationship(
@@ -761,6 +782,17 @@ class EvaluationScore(Base):
         Text,
     )
 
+    corrected_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+
+    corrected_at = Column(
+        DateTime,
+        nullable=True,
+    )
+
     evaluation = relationship(
         "Evaluation",
         back_populates="scores",
@@ -768,6 +800,11 @@ class EvaluationScore(Base):
 
     criterion = relationship(
         "EvaluationCriteria",
+    )
+
+    corrected_by_user = relationship(
+        "User",
+        foreign_keys=[corrected_by_user_id],
     )
 
     __table_args__ = (
@@ -798,6 +835,11 @@ class AuditLog(Base):
         nullable=False,
     )
 
+    actor_role = Column(
+        String(20),
+        nullable=True,
+    )
+
     action = Column(
         String,
         nullable=False,
@@ -811,16 +853,36 @@ class AuditLog(Base):
         Integer,
     )
 
+    target_judge_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+
+    old_value = Column(
+        String,
+        nullable=True,
+    )
+
+    new_value = Column(
+        String,
+        nullable=True,
+    )
+
+    reason = Column(
+        Text,
+        nullable=True,
+    )
+
     timestamp = Column(
         DateTime,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(timezone.utc),
     )
 
     ip_address = Column(
         String,
     )
 
-    # JSON (portable across SQLite and PostgreSQL)
     metadata_json = Column(
         JSON,
         nullable=True,
@@ -828,5 +890,6 @@ class AuditLog(Base):
 
     user = relationship(
         "User",
+        foreign_keys=[user_id],
         back_populates="audit_logs",
     )

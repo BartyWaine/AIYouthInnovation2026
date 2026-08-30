@@ -2,7 +2,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-from ..database import SessionLocal
+from ..database import get_db
 from .. import models
 from ..security import (
     verify_password,
@@ -13,14 +13,6 @@ from ..security import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 @router.post("/login")
@@ -90,7 +82,7 @@ def change_password(
 @router.post("/reset-password")
 def reset_password(
     user_id: int = Body(...),
-    new_password: str = Body(None),
+    new_password: str = Body(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("ADMIN")),
 ):
@@ -98,8 +90,8 @@ def reset_password(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if not new_password:
-        new_password = "default123"
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password cannot be empty")
     user.password_hash = get_password_hash(new_password)
     db.commit()
     db.refresh(user)
-    return {"success": True, "user_id": user.id, "email": user.email, "new_password": "***"}
+    return {"success": True, "user_id": user.id, "email": user.email}

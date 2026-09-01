@@ -17,9 +17,9 @@ def api_get(path, token):
     resp = urllib.request.urlopen(req)
     return json.loads(resp.read())
 
-# Upload as team26
-token = login('team26@sti.edu.mm', 'team123')
-print(f'Team26 login: OK')
+# Upload as team1
+token = login('team1@sti.edu.mm', 'team123')
+print(f'Team1 login: OK')
 
 team_info = api_get('/teams/mine', token)
 comp_id = team_info.get('competition_id')

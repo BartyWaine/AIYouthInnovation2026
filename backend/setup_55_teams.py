@@ -1,4 +1,4 @@
-"""Setup script to load 55 real teams into the database.
+"""Setup script to load 46 real teams into the database.
 SAFE FOR DEVELOPMENT ONLY — requires SEED_DEV=1 environment variable.
 Never run this against a production database.
 """
@@ -24,7 +24,7 @@ from sqlalchemy import inspect as _sqlainspect, text as _text
 
 db = SessionLocal()
 
-# === 0. Create admin and judge users (idempotent — only creates if not exists) ===
+# === 0. Create admin and judge users (idempotent) ===
 pw_hash = get_password_hash("admin123")
 admin = db.query(User).filter(User.email == "admin@sti.edu.mm").first()
 if not admin:
@@ -47,9 +47,10 @@ for i in range(1, 6):
         db.refresh(user)
         print(f"Created {email} -> {role.value} (id={user.id})")
     else:
-        user.role = role
-        db.add(user)
-        db.commit()
+        if user.role != role:
+            user.role = role
+            db.add(user)
+            db.commit()
         print(f"Updated {email} -> {role.value}")
     judge_row = db.query(Judge).filter(Judge.user_id == user.id).first()
     if not judge_row:
@@ -66,26 +67,37 @@ if 'submitted_at' not in cols:
     db.commit()
     print("Added submitted_at column")
 
-# === 1. Ensure 3 competitions exist (create if empty DB) ===
-competitions = db.query(Competition).all()
-if not competitions:
-    print("Creating competitions...")
+# === 2. Ensure 3 competitions exist ===
+comp1 = db.query(Competition).filter(Competition.name == "AI Youth 2026").first()
+if not comp1:
     comp1 = Competition(name="AI Youth 2026", category="AI for Engineering and Technology")
-    comp2 = Competition(name="AI Youth 2026_Social", category="AI for Social Innovation")
-    comp3 = Competition(name="AI Youth 2026_Entrepreneur", category="AI for Entrepreneurship")
-    db.add_all([comp1, comp2, comp3])
-    db.commit()
-    competitions = db.query(Competition).all()
+    db.add(comp1)
 
+comp2 = db.query(Competition).filter(Competition.name == "AI Youth 2026_Social").first()
+if not comp2:
+    comp2 = Competition(name="AI Youth 2026_Social", category="AI for Social Innovation")
+    db.add(comp2)
+
+comp3 = db.query(Competition).filter(Competition.name == "AI Youth 2026_Entrepreneur").first()
+if not comp3:
+    comp3 = Competition(name="AI Youth 2026_Entrepreneur", category="AI for Entrepreneurship")
+    db.add(comp3)
+
+db.commit()
+competitions = [comp1, comp2, comp3]
+print(f"Competitions: {[(c.id, c.name, c.category) for c in competitions]}")
+
+# === 3. Ensure deliverables for each competition ===
 for comp in competitions:
     existing_cats = {d.category for d in db.query(Deliverable).filter(Deliverable.competition_id == comp.id).all() if d.category is not None}
     for cat in DeliverableCategory:
         if cat.value not in existing_cats:
             db.add(Deliverable(competition_id=comp.id, name=cat.value, category=cat))
     db.commit()
-print(f"Competitions: {[(c.id, c.name, c.category) for c in competitions]}")
 
-# === 2. Clean up ALL data (preserve judge/admin users) ===
+comp_deliverables = {c.id: db.query(Deliverable).filter(Deliverable.competition_id == c.id).all() for c in competitions}
+
+# === 4. Clean up ALL team data (preserve judge/admin users) ===
 print("\n=== Cleaning up ===")
 for model in [EvaluationScore, Evaluation, SubmissionFile, Submission,
               JudgeAssignment, TeamMember, AuditLog]:
@@ -103,73 +115,62 @@ db.commit()
 
 print("Cleanup complete")
 
-# === 3. Build comp_deliverables map ===
-comp_deliverables = {c.id: db.query(Deliverable).filter(Deliverable.competition_id == c.id).all() for c in competitions}
-
-# === 5. Create 55 teams ===
+# === 5. Create 46 teams ===
+# AI Entrepreneurship (comp_id=3), AI for Social Innovation (comp_id=2), AI Technology & Engineering (comp_id=1)
 TEAM_DATA = [
-    ("Technologia Ventures", "ConceptX International School", "AI Entrepreneurship", "Htet Shwe Sin"),
+    # AI Entrepreneurship
+    ("Technologia Ventures", "ConceptX International School", "AI for Entrepreneurship", "Htet Shwe Sin"),
+    ("Beyond X", "STI School", "AI for Entrepreneurship", "Eaint Hsu Mon Myint, Eaint Myat Noe San, Bhone Nyan Paing"),
+    ("Secret Weapon", "B.E.H.S 1 Dagon", "AI for Entrepreneurship", "Chan Nyein Kyal Sin, Hsu Lei Phyu, Thuta Aung Myo Htun"),
+    ("Thakhin", "B.E.H.S 1 Dagon", "AI for Entrepreneurship", "Aung Myint Myat, Ye Yint Paing, Zwe Wai Yan Lin"),
+    ("Aesthetic students", "B.E.H.S 1 Dagon", "AI for Entrepreneurship", "Zwe Myo Thant, Wai Yan Soe, Zin Min Oo"),
+    ("May Myint Mo Kyi", "B.E.H.S 1 Dagon", "AI for Entrepreneurship", "May Myint Mo Kyi"),
+    ("ETS Innovators", "Basic Education High School, Minhla, Bago (West)", "AI for Entrepreneurship", "Eaint Chan Myae, Thaw Tar Nyein Chan, Swan Yi Htet"),
+    ("Frame Moggers", "Strategy first international college", "AI for Entrepreneurship", "Htet Kyal Sin, Min Khant Wai Yan Kyaw"),
+    # AI for Social Innovation
     ("BlueNode", "Yangon Education Creation Corner (YECC)", "AI for Social Innovation", "Zay Thuya Oo, Chan Myae Thaw, Zwe Khant Oo"),
     ("BrainGrowth", "The Lumbini Mandalay", "AI for Social Innovation", "Aye Chan Zay, Yaung Ni Lin, La Yaung Naing"),
-    ("Viva La Vida", "Majestic Academy", "AI Technology & Engineering", "Aunt Phyoe Maung, Wai Yan Min Khant, Wai Yan Lin"),
     ("Euphoria", "Majestic Private School", "AI for Social Innovation", "Nant Hay Mhan No No(Judith), Hlaing Min Khant(Riki), Zay Ye Myat(Ardan)"),
     ("Emolink", "STI School (Mandalay)", "AI for Social Innovation", "Phyo Thiri Kyaw, Su Pyae Tun, Chaw Thet Hmue Khin"),
-    ("Beyond X", "STI School", "AI Entrepreneurship", "Eaint Hsu Mon Myint, Eaint Myat Noe San, Bhone Nyan Paing"),
     ("Trustlink Innovators", "STI School (Mandalay)", "AI for Social Innovation", "Aung Pyae Phyo San, Aung Oakga, Khin Meme Ko"),
-    ("Jimmy/Htut Khaung", "STI School (Mandalay)", "AI Technology & Engineering", "Htut Khaung Hmue Win Soe, Oakkar Kyaw"),
-    ("CodeTrio", "STI School", "AI Technology & Engineering", "Min Hein Ko, Swamsa, Zwe Htut Naing"),
-    ("Team Magnet", "HMI", "AI Technology & Engineering", "Swam Bhone Lhyun, John Phyo, Shin Thadar Nyi"),
-    ("RKD", "HMI", "AI Technology & Engineering", "Aye Myint Myat Paing, Pyae Phyo Maung, Waddy Thaw Tar"),
-    ("Code Titans", "HMI", "AI for Social Innovation", "Arkar Kaung Thant, Kyal Sin Thant"),
-    ("O-me Medix", "HMI", "AI for Social Innovation", "Hein Htet Soe, Kaung Khant Win Zaw"),
-    ("Luminary(Lumi)", "STIMU", "AI Technology & Engineering", "Kyal Sin Shunn Lae"),
-    ("AI Don't Understand Us", "STI School", "AI for Social Innovation", "Khant Zaw Hein, Pyae Wunn Thaw"),
+    ("Code Titans", "HMI", "AI for Social Innovation", "Arkar Kaung Thant, Kyal Sin Thant, Hein Htet Soe"),
+    ("O-me Medix", "HMI", "AI for Social Innovation", "Kaung Khant Win Zaw"),
+    ("AI Don't Understand Us", "STI School", "AI for Social Innovation", "Khant Zaw Hein, Pyae Wunn Thaw, Aunt Bhone Aung"),
     ("Sabina", "Future Kidz International School", "AI for Social Innovation", "Soe Pyae Yati"),
-    ("Nwayly.", "GIC", "AI Entrepreneurship", "Nwayly"),
-    ("White Sheet", "SAMS", "AI Technology & Engineering", "Zau Htoi Awng"),
-    ("Dennis", "B.E.H.S(3) Pyapon", "AI Technology & Engineering", "Dennis"),
-    ("The newbie", "B.E.H.S(9) Mawlamyine", "AI Technology & Engineering", "Si Thu Khant, Lin Htet Zaw"),
-    ("77", "IMC", "AI Technology & Engineering", "Aung Kaung Thu"),
     ("Blind Mice", "YDP International School", "AI for Social Innovation", "Lu Maw, Hein Zay Lyan, Khant Min Paing"),
-    ("Xcripted 3", "EC Private High School", "AI Technology & Engineering", "Aung Khant Zaw, Htet Aung Shane, Min Htet Khant Kyaw"),
     ("Synapse", "IIP International School", "AI for Social Innovation", "Yoon Mo Mo Eaim @ Laura, Htet Kyaw Lwin @ Felix"),
     ("NeuraNova", "OiAC Private School", "AI for Social Innovation", "May Myat Thu, Yu Shwe Yi Hlaing"),
     ("Hsu-Data-Divas", "B.E.H.S(1) Letpadan", "AI for Social Innovation", "Hsu Luck Pyae, Hsu Pyae Sone"),
-    ("\u101e\u1004\u103b\u1038\u1040\u1030\u1014\u103e\u1005\u101b\u1038 \u1015\u103c\u102f\u101b\u1031\u102c\u103a", "\u101e\u101c\u1001\u102c\u1000 ၁ \u1015\u103c\u102f\u101b\u1031\u102c\u103a", "AI Technology & Engineering", "Lat Yar Bo, Mya Hnin Khaing, Kyal Sin Lin Let"),
-    ("THINN", "B.E.H.S (2) Sittwe", "AI for Social Innovation", "Thinn Thinn Hlaing"),
-    ("Team GBK", "B.E.H.S (Branch) Thabyubin", "AI Technology & Engineering", "Shine Htet Aung, Ayar Swam Htet Paing"),
-    ("Chan Nyein Kyal Sin", "B.E.H.S 1 Dagon", "AI Entrepreneurship", "Chan Nyein Kyal Sin, Hsu Lei Phyu, Thuta Aung Myo Htun"),
-    ("V", "B.E.H.S 1 Dagon", "AI Technology & Engineering", "Thant Thura, Ye Myat Aung, Lwin Min Hein"),
     ("Viva La Vida", "B.E.H.S 1 Dagon", "AI for Social Innovation", "Hsu Eaint Lwin, Zayar Lin, Eaindray Phyu Sin Myo"),
-    ("Daydreamers", "ELC Private High School", "AI Technology & Engineering", "Ye Yint Zaw, Bhone Turain Htun, Shwe Sin Phyo"),
     ("Cozy Companion", "B.E.H.S 1 Dagon", "AI for Social Innovation", "La Won Yin Myo, Wun Pa Thawdar Ko Htay, Khin Linn Latt Aung"),
     ("Team Vivante", "B.E.H.S 1 Dagon", "AI for Social Innovation", "Wai Yan Lwin, Win Pearl Phyu, Yuya Thanlwin Htut"),
-    ("Three musketeers", "B.E.H.S 1 Dagon", "AI for Social Innovation", "Thin Yati Nay Win, Myu Linn Hay Man Khin, Hein Phyo Kywe"),
-    ("Thakhin", "B.E.H.S 1 Dagon", "AI Entrepreneurship", "Aung Myint Myat, Ye Yint Paing, Zwe Wai Yan Lin"),
+    ("Three Musketeers", "B.E.H.S 1 Dagon", "AI for Social Innovation", "Thin Yati Nay Win, Myu Linn Hay Man Khin, Hein Phyo Kywe"),
     ("Eclipse", "B.E.H.S 1 Dagon", "AI for Social Innovation", "KayZin WinHan, Yoon Nay Yee Hlaing, Shumawa Aung Kyaw"),
-    ("Aesthetic students", "B.E.H.S 1 Dagon", "AI Entrepreneurship", "Zwe Myo Thant, Wai Yan Soe, Zin Min Oo"),
     ("M.I.A", "B.E.H.S 1 Dagon", "AI for Social Innovation", "Lin Lat May Maung, Su Sandi Oakca, Eaint Thu Thu Khin"),
     ("Prism Logic", "B.E.H.S 1 Dagon", "AI for Social Innovation", "Sin Sin Lin, Su Myat Phyu Sin, Myat Min Soe"),
     ("Teen Innovations", "Dagon 1", "AI for Social Innovation", "Ei Po Po Aung, Myat Yadanar Hlaing"),
     ("Thein Naing Squad", "B.E.H.S 1 Dagon", "AI for Social Innovation", "Nay Htet Thein Naing, Phone Myat Thaw, Lin Thuta Kyaw"),
-    ("Innovators of the Global Nexus", "B.E.H.S 1 Dagon", "AI Technology & Engineering", "Hnin Ei Shwe Yee, Si That Shwe Thwe, Thoon Haythi Thet"),
-    ("May Myint Mo Kyi", "B.E.H.S 1 Dagon", "AI Entrepreneurship", "May Myint Mo Kyi"),
     ("Growth learners Thanlwin", "Thanlwin", "AI for Social Innovation", "Aung Hein Kyaw, May Thiri Myat"),
-    ("ETS Innovators", "Basic Education High School, Minhla, Bago (West)", "AI Entrepreneurship", "Eaint Chan Myae, Thaw Tar Nyein Chan, Swan Yi Htet"),
-    ("ROS AI", "B.E.H S(2) Lanmadaw", "AI for Social Innovation", "Kyaw Thu Ya Aung, Shine Wana, Ye Htet Kyaw"),
-    ("Hsu Hsu Htet+Khin Eaidra Min", "B.E.H.S (Puangde)", "AI for Social Innovation", "Khin Eaindra Min, Hsu Hsu Htet"),
+    ("Core 2 AI", "B.E.H.S (Puangde)", "AI for Social Innovation", "Khin Eaindra Min, Hsu Hsu Htet"),
     ("Min Myanmar Team -1", "Min Myanmar Private High School", "AI for Social Innovation", "Thura San, Paing Khant Ko, Si Thu Ye Naing"),
-    ("Min Myanmar Team -2", "Min Myanmar Private High School", "AI Technology & Engineering", "Saw Moo Keh Blute, Kaung Myat Min"),
-    ("Frame Moggers", "Strategy first international college", "AI Entrepreneurship", "Htet Kyal Sin"),
-    ("The Ones", "STI School", "AI Technology & Engineering", "Nang Phyu Sin Myint Myat @ Angel, So Pyay Tun"),
-    ("The 0478 Innovators", "STI School", "AI for Social Innovation", "Nyein Moe Wai, Saw Doh Nay Htoo"),
+    # AI Technology & Engineering
+    ("Viva La Vida", "Majestic Academy", "AI for Engineering and Technology", "Aunt Phyoe Maung, Wai Yan Min Khant, Wai Yan Lin"),
+    ("Jimmy/Htut Khaung", "STI School (Mandalay)", "AI for Engineering and Technology", "Htut Khaung Hmue Win Soe, Oakkar Kyaw"),
+    ("CodeTrio", "STI School", "AI for Engineering and Technology", "Min Hein Ko, Swamsa, Zwe Htut Naing"),
+    ("Team Magnet", "HMI", "AI for Engineering and Technology", "Swam Bhone Lhyun, John Phyo, Shin Thadar Nyi"),
+    ("RKD", "HMI", "AI for Engineering and Technology", "Aye Myint Myat Paing, Pyae Phyo Maung, Waddy Thaw Tar"),
+    ("Luminary(Lumi)", "STIMU", "AI for Engineering and Technology", "Kyal Sin Shunn Lae"),
+    ("The newbie", "B.E.H.S(9) Mawlamyine", "AI for Engineering and Technology", "Si Thu Khant, Lin Htet Zaw"),
+    ("77", "IMC", "AI for Engineering and Technology", "Aung Kaung Thu"),
+    ("Xcripted 3", "EC Private High School", "AI for Engineering and Technology", "Aung Khant Zaw, Htet Aung Shane, Min Htet Khant Kyaw"),
+    ("Team GBK", "B.E.H.S (Branch) Thabyubin", "AI for Engineering and Technology", "Shine Htet Aung, Ayar Swam Htet Paing"),
+    ("V", "B.E.H.S 1 Dagon", "AI for Engineering and Technology", "Thant Thura, Ye Myat Aung, Lwin Min Hein"),
+    ("Innovators of the Global Nexus", "B.E.H.S 1 Dagon", "AI for Engineering and Technology", "Hnin Ei Shwe Yee, Si That Shwe Thwe, Thoon Haythi Thet"),
 ]
 
 CAT_TO_COMP = {
     "AI for Engineering and Technology": 1,
-    "AI Technology & Engineering": 1,
     "AI for Social Innovation": 2,
-    "AI Entrepreneurship": 3,
     "AI for Entrepreneurship": 3,
 }
 
@@ -194,6 +195,7 @@ for i, (team_name, school, cat_str, participants) in enumerate(TEAM_DATA):
         db.add(sub)
 
     db.commit()
+    print(f"  [{i+1}] {team_name} (id={team.id}, comp_id={comp_id})")
 
 print(f"Created {len(TEAM_DATA)} teams")
 
@@ -235,20 +237,21 @@ print(f"Judge assignments: {db.query(JudgeAssignment).count()}")
 
 comp_counts = Counter(t.competition_id for t in db.query(Team).all())
 for comp_id, count in sorted(comp_counts.items()):
+    comp = db.get(Competition, comp_id)
     deliv_count = len(comp_deliverables[comp_id])
-    print(f"  Competition {comp_id}: {count} teams, {deliv_count} deliverables, {count * deliv_count} submissions")
+    print(f"  Competition {comp_id} ({comp.name if comp else '?'}): {count} teams, {deliv_count} deliverables, {count * deliv_count} submissions")
 
 cat_counts = Counter()
 for team_name, school, cat_str, _ in TEAM_DATA:
     cat_counts[cat_str] += 1
 print("\nTeams by category:")
-for cat, count in cat_counts.most_common():
+for cat, count in sorted(cat_counts.items(), key=lambda x: -x[1]):
     print(f"  {cat}: {count}")
 
 print("\nJudge accounts:")
 print("  Judge1 (HEAD_JUDGE): judge1@sti.edu.mm / judge123")
 print("  Judges 2-5 (JUDGE):  judge2@sti.edu.mm through judge5@sti.edu.mm / judge123")
-print("All 55 team accounts: team1@sti.edu.mm through team55@sti.edu.mm / team123")
+print("All team accounts: team{id}@sti.edu.mm / team123")
 print("Done!")
 
 db.close()

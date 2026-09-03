@@ -470,3 +470,40 @@ def update_submission_status(
     db.refresh(audit)
     return {"id": submission.id, "status": submission.status.value}
 
+
+@router.delete("/submissions/{submission_id}/files/{file_id}")
+def delete_file(
+    submission_id: int,
+    file_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role('TEAM_MEMBER')),
+):
+    submission = db.get(models.Submission, submission_id)
+    if submission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+    team_member = db.query(models.TeamMember).filter(
+        models.TeamMember.team_id == submission.team_id,
+        models.TeamMember.user_id == current_user.id,
+    ).first()
+    if not team_member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not part of the submission's team")
+
+    file_record = db.get(models.SubmissionFile, file_id)
+    if file_record is None or file_record.submission_id != submission_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    try:
+        if os.path.exists(file_record.storage_path):
+            os.remove(file_record.storage_path)
+    except OSError:
+        pass
+
+    db.delete(file_record)
+    remaining = db.query(models.SubmissionFile).filter(
+        models.SubmissionFile.submission_id == submission_id
+    ).count()
+    if remaining == 0:
+        submission.status = models.SubmissionStatus.OPEN
+    db.commit()
+    return {"id": file_id, "deleted": True}
+

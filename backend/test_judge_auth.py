@@ -1,7 +1,7 @@
 """Test judge authorization endpoints."""
 import sys, urllib.request, urllib.error, urllib.parse, json
 
-BASE = 'http://127.0.0.1:8022/api/v1'
+BASE = 'http://127.0.0.1:8023/api/v1'
 
 def login(email, pw):
     body = urllib.parse.urlencode({'username': email, 'password': pw}).encode()

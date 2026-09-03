@@ -261,31 +261,35 @@ export default function JudgeDashboard() {
 
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
                      {criteria.map(c => {
-                      const existing = evaluation?.scores?.find(s => s.criterion === c.name)?.score
-                      const savedScore = existing !== undefined ? existing : c.weight
-                      const localKey = `${teamId}-${c.id}`
-                      const displayValue = localScores[localKey] !== undefined ? localScores[localKey] : savedScore
-                      return (
-                        <div key={c.id} className="border p-3 rounded">
-                          <label className="block text-sm font-medium mb-1">{c.name}</label>
-                          <div className="flex items-center gap-2">
+                       const existing = evaluation?.scores?.find(s => s.criterion === c.name)?.score
+                       const localKey = `${teamId}-${c.id}`
+                       const displayValue = localScores[localKey] !== undefined ? localScores[localKey] : (existing !== undefined ? existing : '')
+                       return (
+                         <div key={c.id} className="border p-3 rounded">
+                           <div className="flex justify-between items-baseline mb-1">
+                             <label className="block text-sm font-medium">{c.name}</label>
+                             <span className="text-xs text-gray-400">Max: {c.weight}</span>
+                           </div>
+                           <div className="flex items-center gap-2">
                               <input
                                type="number"
-                               min="0"
-                               max={c.weight}
+                               min="1"
+                               max={Math.min(c.weight, 10)}
                                step="1"
                                value={displayValue}
-                              onChange={e => setLocalScores(prev => ({ ...prev, [localKey]: parseFloat(e.target.value) || 0 }))}
+                              onChange={e => setLocalScores(prev => ({ ...prev, [localKey]: parseInt(e.target.value) || '' }))}
                               onBlur={e => {
-                                const score = parseFloat(e.target.value)
-                                if (!isNaN(score)) handleScoreSubmit(teamId, c.id, score, '')
+                                const val = localScores[localKey]
+                                if (val !== undefined && val !== '' && val >= 1 && val <= Math.min(c.weight, 10)) {
+                                  handleScoreSubmit(teamId, c.id, val, '')
+                                }
                               }}
                               className="w-full px-2 py-1 border rounded text-sm"
                             />
                           </div>
                           <div className="flex justify-between text-xs text-gray-500">
-                            <span>0</span>
-                            <span>{c.weight}</span>
+                            <span>1</span>
+                            <span>{Math.min(c.weight, 10)}</span>
                           </div>
                         </div>
                       )

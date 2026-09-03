@@ -1,7 +1,7 @@
 """18-scenario HEAD_JUDGE and judge authorization test suite."""
 import sys, urllib.request, urllib.error, urllib.parse, json
 
-BASE = 'http://127.0.0.1:8022/api/v1'
+BASE = 'http://127.0.0.1:8023/api/v1'
 RESULTS = []
 
 def login(email, pw):
@@ -43,6 +43,15 @@ def test(msg, expected_pass, fn=None, *args, **kwargs):
     ok = check_ok(fn, *args, **kwargs) if expected_pass else (not check_ok(fn, *args, **kwargs))
     RESULTS.append(('PASS' if ok else 'FAIL', msg))
 
+def reset_eval(token, eval_id, status, reason=None):
+    p = {'new_status': status}
+    if reason:
+        p['reason'] = reason
+    try:
+        post(f'/judges/evaluations/{eval_id}/status', token, p)
+    except Exception:
+        pass
+
 hjt = login('judge1@sti.edu.mm', 'judge123')
 jt2 = login('judge2@sti.edu.mm', 'judge123')
 at  = login('admin@sti.edu.mm', 'admin123')
@@ -69,10 +78,12 @@ ok, r = check(200, get, '/judges/all-scores?competition_id=3', hjt)
 RESULTS.append(('PASS' if not ok else 'FAIL', f"S3: HEAD_JUDGE view all-scores ({len(r) if ok else 0} entries): {r if not ok else 'OK'}"))
 
 # S4: Score >10 rejected
+reset_eval(hjt, EVAL_ID, 'OPEN', 'Test reset')
 ok, r = check(400, post, f'/judges/evaluations/{EVAL_ID}/scores', hjt, {'criterion_id': '2', 'score': '11'})
 RESULTS.append(('PASS' if ok else 'FAIL', f"S4: Score>10 rejected: {r if not ok else 'OK'}"))
 
 # S5: Score <1 rejected
+reset_eval(hjt, EVAL_ID, 'OPEN', 'Test reset')
 ok, r = check(400, post, f'/judges/evaluations/{EVAL_ID}/scores', hjt, {'criterion_id': '2', 'score': '0'})
 RESULTS.append(('PASS' if ok else 'FAIL', f"S5: Score<1 rejected: {r if not ok else 'OK'}"))
 

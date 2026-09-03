@@ -211,12 +211,13 @@ def create_evaluation(
 
 def _validate_score(score: float, criterion: models.EvaluationCriteria) -> int:
     """Validate score is integer 1-10. Returns int score."""
-    if score != int(score) or not (1 <= int(score) <= 10):
+    score_int = round(score)
+    if score_int < 1 or score_int > 10:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Score must be a whole number between 1 and 10",
         )
-    return int(score)
+    return score_int
 
 
 def _check_evaluation_editable(evaluation: models.Evaluation, is_head_correction: bool = False):

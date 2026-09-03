@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getMyTeam, getMyTeamSubmissions } from '../api/teams'
-import { listDeliverables, createSubmission, addFile, getSubmissionFiles, downloadFile } from '../api/deliverables'
+import { listDeliverables, createSubmission, addFile, getSubmissionFiles, downloadFile, deleteFile } from '../api/deliverables'
 import { getRankings } from '../api/competitions'
 import { getFileIcon, formatFileSize } from '../utils'
 
@@ -181,6 +181,19 @@ export default function TeamUploads() {
                           onClick={() => downloadFile(sub.id, f.id, f.original_filename).catch(err => setError(err.message || 'Download failed'))}
                           className="text-indigo-600 hover:text-indigo-800 text-xs px-2 py-1 border border-indigo-200 rounded"
                         >Download</button>
+                        <button
+                          onClick={async () => {
+                            if (!window.confirm('Delete this file?')) return
+                            try {
+                              await deleteFile(sub.id, f.id)
+                              const updated = await getSubmissionFiles(sub.id)
+                              setFiles(prev => ({ ...prev, [sub.id]: updated }))
+                            } catch (err) {
+                              setError(err.response?.data?.detail || 'Delete failed')
+                            }
+                          }}
+                          className="text-red-600 hover:text-red-800 text-xs px-2 py-1 border border-red-200 rounded"
+                        >Delete</button>
                       <div className="flex flex-col items-end text-xs text-gray-400">
                         <span>v{f.version || 1}</span>
                         {f.submitted_at && <span>Submitted: {new Date(f.submitted_at).toLocaleString()}</span>}

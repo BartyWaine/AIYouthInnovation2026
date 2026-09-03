@@ -2,7 +2,7 @@ import sys, json, uuid
 sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', errors='replace')
 import urllib.request, urllib.error, urllib.parse
 
-BASE = 'http://127.0.0.1:8022/api/v1'
+BASE = 'http://127.0.0.1:8023/api/v1'
 
 def login(email, password):
     body = urllib.parse.urlencode({'username': email, 'password': password}).encode('utf-8')

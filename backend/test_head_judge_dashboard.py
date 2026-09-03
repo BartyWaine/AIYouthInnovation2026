@@ -1,7 +1,7 @@
 """Head Judge Dashboard functional test suite (20 scenarios)."""
 import sys, urllib.request, urllib.error, urllib.parse, json
 
-BASE = 'http://127.0.0.1:8022/api/v1'
+BASE = 'http://127.0.0.1:8023/api/v1'
 RESULTS = []
 
 def login(email, pw):

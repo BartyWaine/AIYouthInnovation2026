@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from datetime import datetime, timezone
 
@@ -210,12 +210,12 @@ def create_evaluation(
 # ─── Score helpers ────────────────────────────────────────────────────────────
 
 def _validate_score(score: float, criterion: models.EvaluationCriteria) -> int:
-    """Validate score is integer 1-10. Returns int score."""
+    """Validate score is integer 1 to criterion.weight. Returns int score."""
     score_int = round(score)
-    if score_int < 1 or score_int > 10:
+    if score_int < 1 or score_int > criterion.weight:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Score must be a whole number between 1 and 10",
+            detail=f"Score must be a whole number between 1 and {criterion.weight}",
         )
     return score_int
 
@@ -505,7 +505,7 @@ def list_my_evaluations(
     query = db.query(models.Evaluation).filter(models.Evaluation.judge_id == judge.id)
     if comp_id is not None:
         query = query.filter(models.Evaluation.competition_id == comp_id)
-    evals = query.all()
+    evals = query.options(joinedload(models.Evaluation.scores).joinedload(models.EvaluationScore.criterion)).all()
     return [
         {
             "id": e.id,
@@ -515,6 +515,7 @@ def list_my_evaluations(
             "created_at": e.created_at,
             "scores": [
                 {
+                    "criterion_id": s.criterion_id,
                     "criterion": s.criterion.name if s.criterion else None,
                     "score": s.score,
                     "comment": s.comment,
@@ -548,7 +549,7 @@ def get_competition_scores(
         models.Evaluation.competition_id == competition_id,
         models.Evaluation.team_id.in_(assigned_team_ids),
     ).all()
-    scores = db.query(models.EvaluationScore).join(models.Evaluation).filter(
+    scores = db.query(models.EvaluationScore).options(joinedload(models.EvaluationScore.criterion)).join(models.Evaluation).filter(
         models.Evaluation.competition_id == competition_id,
         models.Evaluation.team_id.in_(assigned_team_ids),
     ).all()
@@ -560,7 +561,9 @@ def get_competition_scores(
         crit_vals = {}
         for s in scores:
             if s.evaluation.team_id == team_id:
-                crit_vals.setdefault(s.criterion.name, []).append(s.score)
+                crit_name = s.criterion.name if s.criterion else None
+                if crit_name:
+                    crit_vals.setdefault(crit_name, []).append(s.score)
         team_scores = {}
         total = 0.0
         for crit_name, vals in crit_vals.items():
@@ -575,6 +578,103 @@ def get_competition_scores(
             "num_judges": num_judges,
             "max_possible": sum(c.weight for c in criteria),
         })
+    return result
+
+
+@router.post("/competitions/{competition_id}/populate-evaluations")
+def populate_evaluations(
+    competition_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(_require_head_judge_or_admin),
+):
+    """Pre-create evaluations for all judge-team assignments in a competition."""
+    assignments = db.query(models.JudgeAssignment).filter(
+        models.JudgeAssignment.competition_id == competition_id
+    ).all()
+    created = 0
+    existing = 0
+    for a in assignments:
+        existing_ev = db.query(models.Evaluation).filter(
+            models.Evaluation.judge_id == a.judge_id,
+            models.Evaluation.team_id == a.team_id,
+            models.Evaluation.competition_id == competition_id,
+        ).first()
+        if existing_ev:
+            existing += 1
+            continue
+        ev = models.Evaluation(
+            judge_id=a.judge_id,
+            team_id=a.team_id,
+            competition_id=competition_id,
+            status=models.EvaluationStatus.OPEN,
+        )
+        db.add(ev)
+        created += 1
+    db.commit()
+    return {"created": created, "existing": existing}
+
+
+@router.get("/competitions/{competition_id}/averaged-scores")
+def get_averaged_scores(
+    competition_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(_require_head_judge_or_admin),
+):
+    """HEAD_JUDGE or ADMIN: weighted average scores per team across all judges."""
+    evaluations = db.query(models.Evaluation).filter(
+        models.Evaluation.competition_id == competition_id
+    ).all()
+    scores = db.query(models.EvaluationScore).options(joinedload(models.EvaluationScore.criterion)).join(models.Evaluation).filter(
+        models.Evaluation.competition_id == competition_id
+    ).all()
+    criteria = db.query(models.EvaluationCriteria).all()
+    comp = db.get(models.Competition, competition_id)
+    crit_map = {c.name: c.weight for c in criteria}
+    total_weight = sum(c.weight for c in criteria)
+
+    team_data = {}
+    for ev in evaluations:
+        t = ev.team_id
+        if t not in team_data:
+            team = db.get(models.Team, t)
+            team_data[t] = {
+                "team_id": t,
+                "team_name": team.name if team else None,
+                "criterion_scores": {},
+                "total_score": 0.0,
+                "num_judges": 0,
+            }
+
+    for ev in evaluations:
+        t = ev.team_id
+        team_data[t]["num_judges"] = len(set(e.judge_id for e in evaluations if e.team_id == t))
+
+    for s in scores:
+        t = s.evaluation.team_id
+        crit_name = s.criterion.name if s.criterion else None
+        if crit_name:
+            if crit_name not in team_data[t]["criterion_scores"]:
+                team_data[t]["criterion_scores"][crit_name] = []
+            team_data[t]["criterion_scores"][crit_name].append(s.score)
+
+    result = []
+    for t, data in team_data.items():
+        weighted_total = 0.0
+        for crit_name, vals in data["criterion_scores"].items():
+            avg = sum(vals) / len(vals) if vals else 0.0
+            weight = crit_map.get(crit_name, 0)
+            data["criterion_scores"][crit_name] = {
+                "avg": round(avg, 1),
+                "count": len(vals),
+                "weight": weight,
+            }
+            weighted_total += avg * weight
+        data["total_score"] = round(weighted_total / total_weight, 1) if total_weight else 0.0
+        data["max_score"] = 100
+        data["competition_name"] = comp.name if comp else None
+        result.append(data)
+
+    result.sort(key=lambda x: x["total_score"], reverse=True)
     return result
 
 

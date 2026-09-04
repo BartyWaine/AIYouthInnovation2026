@@ -15,6 +15,7 @@ import CompetitionTeams from './pages/CompetitionTeams'
 import TeamUploads from './pages/TeamUploads'
 import JudgeDashboard from './pages/JudgeDashboard'
 import HeadJudgeDashboard from './pages/HeadJudgeDashboard'
+import Scoreboard from './pages/Scoreboard'
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth()
@@ -52,6 +53,7 @@ function AppRoutes() {
           <Route path="/users" element={<RoleRoute allowedRoles={['ADMIN']}><AdminUsers /></RoleRoute>} />
           <Route path="/judges" element={<RoleRoute allowedRoles={['ADMIN']}><JudgeManagement /></RoleRoute>} />
           <Route path="/audit-logs" element={<RoleRoute allowedRoles={['ADMIN', 'HEAD_JUDGE']}><AuditLogs /></RoleRoute>} />
+          <Route path="/scoreboard" element={<RoleRoute allowedRoles={['ADMIN', 'HEAD_JUDGE', 'JUDGE']}><Scoreboard /></RoleRoute>} />
           <Route path="/" element={<Navigate to="/dashboard" />} />
         </Routes>
       </div>

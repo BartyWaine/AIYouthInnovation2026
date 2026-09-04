@@ -6,6 +6,7 @@ import {
   correctScore as correctScoreApi,
   getEvaluationAudit,
   getCriteria,
+  getAveragedScores,
 } from '../api/judges'
 import { listCompetitions } from '../api/competitions'
 
@@ -26,6 +27,7 @@ function StatusBadge({ status }) {
 
 export default function HeadJudgeDashboard() {
   const [allScores, setAllScores] = useState([])
+  const [avgScores, setAvgScores] = useState([])
   const [criteria, setCriteria] = useState([])
   const [competitions, setCompetitions] = useState([])
   const [compId, setCompId] = useState('')
@@ -60,8 +62,12 @@ export default function HeadJudgeDashboard() {
     setLoading(true)
     setError('')
     try {
-      const data = await getAllScores(competitionId)
+      const [data, avgData] = await Promise.all([
+        getAllScores(competitionId),
+        getAveragedScores(competitionId),
+      ])
       setAllScores(data)
+      setAvgScores(avgData)
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to load scores')
     } finally {
@@ -191,7 +197,7 @@ export default function HeadJudgeDashboard() {
         <>
           <div className="mb-4 flex items-center gap-3">
             <span className="text-sm text-gray-600">
-              {allScores.length} evaluation(s) found
+              {avgScores.length} team(s) ranked
             </span>
             <div className="flex items-center gap-2 ml-auto">
               <select
@@ -223,7 +229,50 @@ export default function HeadJudgeDashboard() {
             </div>
           </div>
 
-          {/* Score matrix */}
+          {/* Averaged score table */}
+          <div className="overflow-x-auto border rounded-lg">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="p-3 text-left">Rank</th>
+                  <th className="p-3 text-left">Team</th>
+                  <th className="p-3 text-center">Judges</th>
+                  <th className="p-3 text-center">Total</th>
+                  {criteria.map(c => (
+                    <th key={c.id} className="p-3 text-center">{c.name}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {avgScores.length === 0 && (
+                  <tr><td colSpan={criteria.length + 4} className="p-4 text-center text-gray-400">No scores yet</td></tr>
+                )}
+                {avgScores.map((team, idx) => (
+                  <tr key={team.team_id} className="border-b hover:bg-gray-50">
+                    <td className="p-3 font-bold text-indigo-600">#{idx + 1}</td>
+                    <td className="p-3 font-medium">{team.team_name || 'Team ' + team.team_id}</td>
+                    <td className="p-3 text-center">{team.num_judges}</td>
+                    <td className="p-3 text-center font-bold">{team.total_score} / {team.max_possible}</td>
+                    {criteria.map(c => {
+                      const cs = team.criterion_scores[c.name]
+                      return (
+                        <td key={c.id} className="p-3 text-center">
+                          {cs ? (
+                            <span>{cs.avg} <span className="text-xs text-gray-400">({cs.count})</span></span>
+                          ) : (
+                            <span className="text-gray-300">—</span>
+                          )}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Individual evaluation management */}
+          <h2 className="text-lg font-semibold mt-8 mb-3">Manage Individual Evaluations</h2>
           <div className="overflow-x-auto border rounded-lg">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">

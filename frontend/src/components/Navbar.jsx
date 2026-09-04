@@ -46,8 +46,9 @@ export default function Navbar() {
             {isAdmin && <Link to="/teams" className="hover:text-indigo-200 px-2 py-1">Teams</Link>}
             {isTeamMember && <Link to="/uploads" className="hover:text-indigo-200 px-2 py-1">My Uploads</Link>}
              {isAdmin && <Link to="/judges" className="hover:text-indigo-200 px-2 py-1">Judges</Link>}
-             {isJudge && <Link to="/judge-dashboard" className="hover:text-indigo-200 px-2 py-1">Judge Dashboard</Link>}
-             {isHeadJudge && <Link to="/head-judge-dashboard" className="hover:text-indigo-200 px-2 py-1 font-semibold">Head Judge</Link>}
+              {isJudge && <Link to="/judge-dashboard" className="hover:text-indigo-200 px-2 py-1">Judge Dashboard</Link>}
+              {isJudge && <Link to="/scoreboard" className="hover:text-indigo-200 px-2 py-1">Scoreboard</Link>}
+              {isHeadJudge && <Link to="/head-judge-dashboard" className="hover:text-indigo-200 px-2 py-1 font-semibold">Head Judge</Link>}
             {isAdmin && <Link to="/users" className="hover:text-indigo-200 px-2 py-1">Users</Link>}
             {isAdmin && <Link to="/audit-logs" className="hover:text-indigo-200 px-2 py-1">Logs</Link>}
             <span className="text-indigo-200 ml-2">{user.email}</span>

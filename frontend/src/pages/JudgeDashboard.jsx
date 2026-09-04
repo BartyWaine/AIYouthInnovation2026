@@ -56,19 +56,44 @@ export default function JudgeDashboard() {
           getCompetitionScores(compId),
         ])
       }
+      console.log('[loadData] isAll:', isAll, 'evalData count:', evalData.length, 'evalData[0] scores:', evalData[0]?.scores)
       setAssignments(assignData)
       setSubmissions(subData)
       setCriteria(critData)
       setEvaluations(evalData)
       setScores(scoreData)
       const initScores = {}
+      const criteriaMap = {}
+      critData.forEach(c => { criteriaMap[c.id] = c })
       for (const ev of evalData) {
         for (const sc of (ev.scores || [])) {
-          initScores[`${ev.team_id}-${sc.criterion_id}`] = sc.score
+          const key = sc.criterion_id ? `${ev.team_id}-${sc.criterion_id}` : `${ev.team_id}-${sc.criterion}`
+          initScores[key] = sc.score
         }
       }
+      console.log('[loadData] initScores keys:', Object.keys(initScores))
       setLocalScores(initScores)
+      if (isAll && evalData.length > 0) {
+        const computedScores = {}
+        for (const ev of evalData) {
+          const tid = String(ev.team_id)
+          if (!computedScores[tid]) {
+            computedScores[tid] = { team_id: ev.team_id, total_score: 0, criteria_scores: {}, num_judges: 1, max_possible: 0 }
+          }
+          const cs = computedScores[tid]
+          for (const sc of (ev.scores || [])) {
+            if (sc.criterion) {
+              if (!cs.criteria_scores[sc.criterion]) cs.criteria_scores[sc.criterion] = { score: 0 }
+              cs.criteria_scores[sc.criterion].score = sc.score
+              cs.total_score += sc.score
+            }
+          }
+        }
+        console.log('[loadData] computedScores:', Object.keys(computedScores))
+        setScores(Object.values(computedScores))
+      }
     } catch (err) {
+      console.error('[loadData] error:', err)
       setError(err.response?.data?.detail || 'Failed to load dashboard')
     } finally {
       setLoading(false)
@@ -89,13 +114,16 @@ export default function JudgeDashboard() {
       if (!evaluation) {
         const teamSubmission = submissions.find(s => s.team_id === parseInt(teamId))
         const teamCompId = teamSubmission?.competition_id || (isAll ? parseInt(teamSubmission?.competition_id) || 1 : compId)
+        console.log('[handleScoreSubmit] No eval, creating for team', teamId, 'comp', teamCompId)
         const evalResult = await createMyEvaluation(teamId, teamCompId)
         evaluation = { id: evalResult.id, team_id: teamId, scores: [] }
         setEvaluations(prev => [...prev, evaluation])
       }
+      console.log('[handleScoreSubmit] Adding score eval', evaluation.id, 'criterion', criterionId, 'score', score)
       await addScore(evaluation.id, criterionId, score, comment)
       await loadData()
     } catch (err) {
+      console.error('[handleScoreSubmit] error:', err)
       setError(err.response?.data?.detail || 'Failed to submit score')
     }
   }
@@ -112,7 +140,10 @@ export default function JudgeDashboard() {
   })
   const teamList = Object.entries(teams)
   const filteredTeams = searchTeam
-    ? teamList.filter(([teamId]) => String(teamId) === String(searchTeam))
+    ? teamList.filter(([teamId, team]) =>
+        String(teamId) === String(searchTeam) ||
+        team.name.toLowerCase().includes(searchTeam.toLowerCase())
+      )
     : teamList
 
   return (
@@ -218,11 +249,10 @@ export default function JudgeDashboard() {
       {activeTab === 'scores' && (
         <>
           <div className="flex gap-3 mb-4 items-center">
-            <label className="text-sm font-medium text-gray-700">Go to Team ID:</label>
+            <label className="text-sm font-medium text-gray-700">Search Team:</label>
             <input
-              type="number"
-              min="1"
-              placeholder="Enter team ID"
+              type="text"
+              placeholder="Enter team ID or name"
               value={searchTeam}
               onChange={e => setSearchTeam(e.target.value)}
               className="w-40 px-3 py-1 border rounded text-sm"
@@ -239,7 +269,7 @@ export default function JudgeDashboard() {
           {teamList.length === 0 ? (
             <p className="text-gray-500">No teams to score.</p>
           ) : filteredTeams.length === 0 ? (
-            <p className="text-gray-500">No team found with ID "{searchTeam}".</p>
+            <p className="text-gray-500">No team found with "{searchTeam}".</p>
           ) : (
             filteredTeams.map(([teamId, team]) => {
               const scoreData = getScoreForTeam(teamId)
@@ -272,24 +302,24 @@ export default function JudgeDashboard() {
                            </div>
                            <div className="flex items-center gap-2">
                               <input
-                               type="number"
-                               min="1"
-                               max={Math.min(c.weight, 10)}
-                               step="1"
-                               value={displayValue}
-                              onChange={e => setLocalScores(prev => ({ ...prev, [localKey]: parseInt(e.target.value) || '' }))}
-                              onBlur={e => {
-                                const val = localScores[localKey]
-                                if (val !== undefined && val !== '' && val >= 1 && val <= Math.min(c.weight, 10)) {
-                                  handleScoreSubmit(teamId, c.id, val, '')
-                                }
-                              }}
-                              className="w-full px-2 py-1 border rounded text-sm"
-                            />
-                          </div>
-                          <div className="flex justify-between text-xs text-gray-500">
-                            <span>1</span>
-                            <span>{Math.min(c.weight, 10)}</span>
+                                type="number"
+                                min="1"
+                                max={c.weight}
+                                step="1"
+                                value={displayValue}
+                                onChange={e => setLocalScores(prev => ({ ...prev, [localKey]: parseInt(e.target.value) || '' }))}
+                                onBlur={e => {
+                                  const val = parseInt(e.target.value) || ''
+                                  if (val !== '' && val >= 1 && val <= c.weight) {
+                                    handleScoreSubmit(teamId, c.id, val, '')
+                                  }
+                                }}
+                                className="w-full px-2 py-1 border rounded text-sm"
+                              />
+                            </div>
+                            <div className="flex justify-between text-xs text-gray-500">
+                              <span>1</span>
+                              <span>{c.weight}</span>
                           </div>
                         </div>
                       )

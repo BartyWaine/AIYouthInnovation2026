@@ -15,5 +15,7 @@ export const getCompetitionScores = (compId) => api.get(`/judges/competitions/${
 export const listMyEvaluations = (compId) => api.get('/judges/evaluations', { params: { comp_id: compId } }).then(r => r.data)
 export const getJudgeAllSubmissions = () => api.get('/judges/submissions').then(r => r.data)
 export const getAllScores = (competitionId) => api.get('/judges/all-scores', { params: { competition_id: competitionId } }).then(r => r.data)
+export const getAveragedScores = (competitionId) => api.get('/judges/competitions/' + competitionId + '/averaged-scores').then(r => r.data)
+export const populateEvaluations = (competitionId) => api.post('/judges/competitions/' + competitionId + '/populate-evaluations').then(r => r.data)
 export const updateEvaluationStatus = (evaluationId, newStatus, reason) => api.post(`/judges/evaluations/${evaluationId}/status`, null, { params: { new_status: newStatus, reason } }).then(r => r.data)
 export const getEvaluationAudit = (evaluationId) => api.get(`/judges/evaluations/${evaluationId}/audit`).then(r => r.data)

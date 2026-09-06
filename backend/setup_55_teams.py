@@ -87,7 +87,25 @@ db.commit()
 competitions = [comp1, comp2, comp3]
 print(f"Competitions: {[(c.id, c.name, c.category) for c in competitions]}")
 
-# === 3. Ensure deliverables for each competition ===
+# === 3. Ensure evaluation criteria exist (global, not per-competition) ===
+CRITERIA = [
+    ("Innovation", 30.0),
+    ("Feasibility", 25.0),
+    ("Presentation", 25.0),
+    ("Impact", 20.0),
+]
+print("\n=== Seeding evaluation criteria ===")
+for name, weight in CRITERIA:
+    existing = db.query(EvaluationCriteria).filter(EvaluationCriteria.name == name).first()
+    if not existing:
+        ec = EvaluationCriteria(name=name, weight=weight)
+        db.add(ec)
+        print(f"  Created: {name} (weight={weight})")
+    else:
+        print(f"  Exists: {name} (weight={existing.weight})")
+db.commit()
+
+# === 4. Ensure deliverables for each competition ===
 for comp in competitions:
     existing_cats = {d.category for d in db.query(Deliverable).filter(Deliverable.competition_id == comp.id).all() if d.category is not None}
     for cat in DeliverableCategory:
@@ -97,7 +115,7 @@ for comp in competitions:
 
 comp_deliverables = {c.id: db.query(Deliverable).filter(Deliverable.competition_id == c.id).all() for c in competitions}
 
-# === 4. Clean up ALL team data (preserve judge/admin users) ===
+# === 5. Clean up ALL team data (preserve judge/admin users) ===
 print("\n=== Cleaning up ===")
 for model in [EvaluationScore, Evaluation, SubmissionFile, Submission,
               JudgeAssignment, TeamMember, AuditLog]:
@@ -115,7 +133,7 @@ db.commit()
 
 print("Cleanup complete")
 
-# === 5. Create 46 teams ===
+# === 6. Create 46 teams ===
 # AI Entrepreneurship (comp_id=3), AI for Social Innovation (comp_id=2), AI Technology & Engineering (comp_id=1)
 TEAM_DATA = [
     # AI Entrepreneurship
@@ -199,7 +217,7 @@ for i, (team_name, school, cat_str, participants) in enumerate(TEAM_DATA):
 
 print(f"Created {len(TEAM_DATA)} teams")
 
-# === 6. Assign all judges to all teams ===
+# === 7. Assign all judges to all teams ===
 print(f"\n=== Assigning judges ===")
 judges = db.query(Judge).all()
 all_teams = db.query(Team).all()
@@ -224,7 +242,7 @@ for judge in judges:
 total_assign = db.query(JudgeAssignment).count()
 print(f"Total judge assignments: {total_assign}")
 
-# === 7. Summary ===
+# === 8. Summary ===
 print("\n=== FINAL SUMMARY ===")
 print(f"Users: {db.query(User).count()}")
 print(f"  Admin: {db.query(User).filter(User.role == UserRole.ADMIN).count()}")

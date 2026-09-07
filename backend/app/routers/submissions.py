@@ -115,6 +115,17 @@ def list_deliverables(
     query = db.query(models.Deliverable)
     if competition_id is not None:
         query = query.filter(models.Deliverable.competition_id == competition_id)
+    if current_user.role.value == "TEAM_MEMBER":
+        member = db.query(models.TeamMember).filter(models.TeamMember.user_id == current_user.id).first()
+        if not member:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view deliverables")
+        if competition_id is not None:
+            team = db.get(models.Team, member.team_id)
+            if team and team.competition_id != competition_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view deliverables for this competition")
+        else:
+            allowed_comp = db.get(models.Team, member.team_id).competition_id if member else None
+            query = query.filter(models.Deliverable.competition_id == allowed_comp)
     return query.all()
 
 
@@ -166,7 +177,33 @@ def list_submissions(
     deliverable = db.get(models.Deliverable, deliverable_id)
     if not deliverable:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deliverable not found")
-    submissions = db.query(models.Submission).filter(models.Submission.deliverable_id == deliverable_id).all()
+    role = current_user.role.value
+    if role == "ADMIN":
+        submissions = db.query(models.Submission).filter(models.Submission.deliverable_id == deliverable_id).all()
+    elif role in ("JUDGE", "HEAD_JUDGE"):
+        judge = db.query(models.Judge).filter(models.Judge.user_id == current_user.id).first()
+        if not judge:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not a judge")
+        assigned_team_ids = [
+            ja.team_id for ja in db.query(models.JudgeAssignment).filter(
+                models.JudgeAssignment.judge_id == judge.id,
+                models.JudgeAssignment.competition_id == deliverable.competition_id,
+            ).all()
+        ]
+        if not assigned_team_ids:
+            return []
+        submissions = db.query(models.Submission).filter(
+            models.Submission.deliverable_id == deliverable_id,
+            models.Submission.team_id.in_(assigned_team_ids),
+        ).all()
+    else:
+        member = db.query(models.TeamMember).filter(models.TeamMember.user_id == current_user.id).first()
+        if not member:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view submissions")
+        submissions = db.query(models.Submission).filter(
+            models.Submission.deliverable_id == deliverable_id,
+            models.Submission.team_id == member.team_id,
+        ).all()
     result = []
     for sub in submissions:
         team = db.get(models.Team, sub.team_id)
@@ -192,11 +229,8 @@ def create_submission(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role('TEAM_MEMBER')),
 ):
-    if submission_status not in models.SubmissionStatus.__members__:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status")
     if db.get(models.Deliverable, deliverable_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deliverable not found")
-    # Verify current user is a member of the team
     team_member = db.query(models.TeamMember).filter(
         models.TeamMember.team_id == team_id,
         models.TeamMember.user_id == current_user.id
@@ -208,12 +242,11 @@ def create_submission(
         deliverable_id=deliverable_id,
         team_id=team_id,
         version=version,
-        status=models.SubmissionStatus[submission_status],
+        status=models.SubmissionStatus.OPEN,
     )
     db.add(submission)
     db.commit()
     db.refresh(submission)
-    # Log audit record for submission creation
     audit = models.AuditLog(
         user_id=current_user.id,
         action='create_submission',
@@ -437,33 +470,26 @@ def update_submission_status(
     submission_id: int,
     new_status: str,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_role('TEAM_MEMBER')),
+    current_user: models.User = Depends(get_current_user),
 ):
-    # Verify submission exists
+    role = current_user.role.value
+    if role not in ("ADMIN", "HEAD_JUDGE", "JUDGE"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only ADMIN, HEAD_JUDGE, or JUDGE can change submission status")
     submission = db.get(models.Submission, submission_id)
     if not submission:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
-    # Verify user belongs to the team of the submission
-    team_member = db.query(models.TeamMember).filter(
-        models.TeamMember.team_id == submission.team_id,
-        models.TeamMember.user_id == current_user.id,
-    ).first()
-    if not team_member:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not part of the submission's team")
-    # Validate status
     if new_status not in models.SubmissionStatus.__members__:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status")
-    # Update status
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid status. Allowed: {', '.join(models.SubmissionStatus.__members__)}")
+    old_status = submission.status.value
     submission.status = models.SubmissionStatus[new_status]
     db.commit()
     db.refresh(submission)
-    # Audit log for status change
     audit = models.AuditLog(
         user_id=current_user.id,
         action='update_submission_status',
         entity_type='Submission',
         entity_id=submission.id,
-        metadata_json={"old_status": submission.status.value, "new_status": new_status},
+        metadata_json={"old_status": old_status, "new_status": new_status},
     )
     db.add(audit)
     db.commit()

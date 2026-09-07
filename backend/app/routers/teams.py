@@ -13,12 +13,26 @@ class TeamCreate(BaseModel):
 router = APIRouter(prefix="/teams", tags=["teams"])
 
 
+def _user_team_scope(db: Session, user: models.User):
+    """Return the team IDs the user is permitted to see."""
+    role = user.role.value
+    if role in ("ADMIN", "JUDGE", "HEAD_JUDGE"):
+        return None
+    if role == "TEAM_MEMBER":
+        members = db.query(models.TeamMember).filter(models.TeamMember.user_id == user.id).all()
+        return [m.team_id for m in members]
+    return []
+
+
 @router.get("")
 def list_teams(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    return db.query(models.Team).all()
+    scope = _user_team_scope(db, current_user)
+    if scope is None:
+        return db.query(models.Team).all()
+    return db.query(models.Team).filter(models.Team.id.in_(scope)).all()
 
 
 @router.post("")
@@ -95,6 +109,9 @@ def get_team(team_id: int, db: Session = Depends(get_db), current_user: models.U
     team = db.get(models.Team, team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
+    scope = _user_team_scope(db, current_user)
+    if scope is not None and team_id not in scope:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this team")
     return {
         "id": team.id,
         "name": team.name,
@@ -108,6 +125,9 @@ def list_members(team_id: int, db: Session = Depends(get_db), current_user: mode
     team = db.get(models.Team, team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
+    scope = _user_team_scope(db, current_user)
+    if scope is not None and team_id not in scope:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this team's members")
     return [{"id": m.id, "user_id": m.user_id, "email": m.user.email, "is_leader": m.is_leader} for m in team.members]
 
 

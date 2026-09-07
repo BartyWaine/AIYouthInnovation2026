@@ -18,6 +18,8 @@ def list_competitions(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    if current_user.role.value not in ("ADMIN", "JUDGE", "HEAD_JUDGE"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to list competitions")
     comps = db.query(models.Competition).all()
     return [
         {
@@ -91,6 +93,8 @@ def delete_competition(competition_id: int, db: Session = Depends(get_db), curre
 
 @router.get("/{competition_id}/teams")
 def list_competition_teams(competition_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    if current_user.role.value not in ("ADMIN", "JUDGE", "HEAD_JUDGE"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to list teams for this competition")
     comp = db.get(models.Competition, competition_id)
     if not comp:
         raise HTTPException(status_code=404, detail="Competition not found")

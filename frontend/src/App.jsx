@@ -41,11 +41,11 @@ function AppRoutes() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
-          <Route path="/competitions" element={<PrivateRoute><AdminCompetitions /></PrivateRoute>} />
+          <Route path="/competitions" element={<RoleRoute allowedRoles={['ADMIN']}><AdminCompetitions /></RoleRoute>} />
           <Route path="/competitions/:id" element={<PrivateRoute><CompetitionDetail /></PrivateRoute>} />
           <Route path="/competitions/:compId/deliverables" element={<RoleRoute allowedRoles={['ADMIN']}><Deliverables /></RoleRoute>} />
           <Route path="/competitions/:compId/teams" element={<PrivateRoute><CompetitionTeams /></PrivateRoute>} />
-          <Route path="/teams" element={<PrivateRoute><AdminTeams /></PrivateRoute>} />
+          <Route path="/teams" element={<RoleRoute allowedRoles={['ADMIN']}><AdminTeams /></RoleRoute>} />
           <Route path="/teams/:id" element={<PrivateRoute><TeamDetail /></PrivateRoute>} />
           <Route path="/uploads" element={<PrivateRoute><TeamUploads /></PrivateRoute>} />
           <Route path="/judge-dashboard" element={<RoleRoute allowedRoles={['JUDGE', 'HEAD_JUDGE']}><JudgeDashboard /></RoleRoute>} />

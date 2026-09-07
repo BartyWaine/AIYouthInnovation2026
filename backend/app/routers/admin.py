@@ -17,7 +17,16 @@ def require_admin(current_user: models.User = Depends(get_current_user)):
 
 @router.get("/users")
 def list_users(db: Session = Depends(get_db), admin: models.User = Depends(require_role('ADMIN'))):
-    return db.query(models.User).all()
+    users = db.query(models.User).all()
+    return [
+        {
+            "id": u.id,
+            "email": u.email,
+            "role": u.role.value,
+            "created_at": u.created_at,
+        }
+        for u in users
+    ]
 
 
 @router.post("/users")
@@ -58,6 +67,8 @@ def list_criteria(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    if current_user.role.value not in ("ADMIN", "HEAD_JUDGE", "JUDGE"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view evaluation criteria")
     return db.query(models.EvaluationCriteria).all()
 
 

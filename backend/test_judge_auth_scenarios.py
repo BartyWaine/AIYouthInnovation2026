@@ -77,10 +77,10 @@ RESULTS.append(('PASS' if not ok else 'FAIL', f"S2: HEAD_JUDGE add score: {r if 
 ok, r = check(200, get, '/judges/all-scores?competition_id=3', hjt)
 RESULTS.append(('PASS' if not ok else 'FAIL', f"S3: HEAD_JUDGE view all-scores ({len(r) if ok else 0} entries): {r if not ok else 'OK'}"))
 
-# S4: Score >10 rejected
+# S4: Score > weight rejected (criterion_id=2 is Feasibility, weight=25)
 reset_eval(hjt, EVAL_ID, 'OPEN', 'Test reset')
-ok, r = check(400, post, f'/judges/evaluations/{EVAL_ID}/scores', hjt, {'criterion_id': '2', 'score': '11'})
-RESULTS.append(('PASS' if ok else 'FAIL', f"S4: Score>10 rejected: {r if not ok else 'OK'}"))
+ok, r = check(400, post, f'/judges/evaluations/{EVAL_ID}/scores', hjt, {'criterion_id': '2', 'score': '26'})
+RESULTS.append(('PASS' if ok else 'FAIL', f"S4: Score>weight rejected: {r if not ok else 'OK'}"))
 
 # S5: Score <1 rejected
 reset_eval(hjt, EVAL_ID, 'OPEN', 'Test reset')

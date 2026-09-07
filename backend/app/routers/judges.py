@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from ..database import get_db
 from .. import models
 from ..security import get_current_user, require_role
+from ..rate_limiter import limiter, get_limit
 
 router = APIRouter(prefix="/judges", tags=["judges"])
 
@@ -25,8 +26,15 @@ def _get_or_404(db, model, pk):
 
 
 def _audit_log(db, user, action, entity_type, entity_id, target_judge_id=None,
-                old_value=None, new_value=None, reason=None, metadata=None):
+                old_value=None, new_value=None, reason=None, metadata=None, request=None):
     """Create an audit log entry. Must be called within the caller's transaction."""
+    ip_address = None
+    if request is not None:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            ip_address = forwarded.split(",")[0].strip()
+        else:
+            ip_address = request.client.host if request.client else None
     log = models.AuditLog(
         user_id=user.id,
         actor_role=user.role.value,
@@ -38,6 +46,7 @@ def _audit_log(db, user, action, entity_type, entity_id, target_judge_id=None,
         new_value=str(new_value) if new_value is not None else None,
         reason=reason,
         metadata_json=metadata,
+        ip_address=ip_address,
     )
     db.add(log)
     return log
@@ -60,6 +69,7 @@ def create_judge(
     user_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role('ADMIN')),
+    request: Request = None,
 ):
     user = _get_or_404(db, models.User, user_id)
     if user.role not in (models.UserRole.JUDGE, models.UserRole.HEAD_JUDGE):
@@ -71,7 +81,7 @@ def create_judge(
     db.add(judge)
     db.commit()
     db.refresh(judge)
-    _audit_log(db, current_user, 'create_judge', 'Judge', judge.id)
+    _audit_log(db, current_user, 'create_judge', 'Judge', judge.id, request=request)
     db.commit()
     return {"id": judge.id, "user_id": judge.user_id}
 
@@ -139,6 +149,7 @@ def create_my_evaluation(
     competition_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(_require_judge_or_head),
+    request: Request = None,
 ):
     judge = db.query(models.Judge).filter(models.Judge.user_id == current_user.id).first()
     if not judge:
@@ -166,7 +177,7 @@ def create_my_evaluation(
     db.add(evaluation)
     db.commit()
     db.refresh(evaluation)
-    _audit_log(db, current_user, 'create_evaluation', 'Evaluation', evaluation.id)
+    _audit_log(db, current_user, 'create_evaluation', 'Evaluation', evaluation.id, request=request)
     db.commit()
     return {"id": evaluation.id, "status": evaluation.status, "existing": False}
 
@@ -189,6 +200,7 @@ def create_evaluation(
     competition_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role('ADMIN')),
+    request: Request = None,
 ):
     _get_or_404(db, models.Judge, judge_id)
     _get_or_404(db, models.Team, team_id)
@@ -202,7 +214,7 @@ def create_evaluation(
     db.add(evaluation)
     db.commit()
     db.refresh(evaluation)
-    _audit_log(db, current_user, 'create_evaluation', 'Evaluation', evaluation.id)
+    _audit_log(db, current_user, 'create_evaluation', 'Evaluation', evaluation.id, request=request)
     db.commit()
     return {"id": evaluation.id}
 
@@ -246,6 +258,7 @@ def add_score(
     comment: str = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(_require_judge_or_head),
+    request: Request = None,
 ):
     evaluation = _get_or_404(db, models.Evaluation, evaluation_id)
     judge = db.query(models.Judge).filter(models.Judge.user_id == current_user.id).first()
@@ -281,6 +294,7 @@ def add_score(
             db, current_user, 'add_score', 'EvaluationScore', existing.id,
             target_judge_id=evaluation.judge_id,
             old_value=old_val, new_value=score_int,
+            request=request,
         )
         db.commit()
     except Exception:
@@ -340,6 +354,7 @@ def get_all_judges_scores(
 # ─── HEAD_JUDGE: correct another judge's mark ─────────────────────────────────
 
 @router.patch("/evaluations/{evaluation_id}/scores/correct")
+@limiter.limit(get_limit("RATE_LIMIT_CORRECT_SCORE", "5/minute"))
 def correct_score(
     evaluation_id: int,
     criterion_id: int,
@@ -347,6 +362,7 @@ def correct_score(
     reason: str = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(_require_head_judge_or_admin),
+    request: Request = None,
 ):
     if not reason or not reason.strip():
         raise HTTPException(
@@ -395,6 +411,7 @@ def correct_score(
             target_judge_id=evaluation.judge_id,
             old_value=old_val, new_value=score_int,
             reason=reason.strip(),
+            request=request,
         )
         db.commit()
     except Exception:
@@ -414,12 +431,14 @@ def correct_score(
 # ─── Evaluation status: lock / finalize / reopen ──────────────────────────────
 
 @router.post("/evaluations/{evaluation_id}/status")
+@limiter.limit(get_limit("RATE_LIMIT_EVAL_STATUS", "5/minute"))
 def update_evaluation_status(
     evaluation_id: int,
     new_status: models.EvaluationStatus,
     reason: str = Query(default=None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(_require_head_judge_or_admin),
+    request: Request = None,
 ):
     VALID = {models.EvaluationStatus.OPEN, models.EvaluationStatus.SUBMITTED, models.EvaluationStatus.LOCKED, models.EvaluationStatus.FINALIZED}
     if new_status not in VALID:
@@ -454,6 +473,7 @@ def update_evaluation_status(
             db, current_user, action, 'Evaluation', evaluation.id,
             old_value=old_status, new_value=new_status,
             reason=reason.strip() if reason else None,
+            request=request,
         )
         db.commit()
     except Exception:

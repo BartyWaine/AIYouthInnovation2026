@@ -31,6 +31,16 @@ eval_data = json.loads(resp.read())
 eval_id = eval_data['id']
 print(f'Eval created: id={eval_id}')
 
+# Ensure the evaluation is OPEN before scoring (idempotent reset)
+params_reset2 = urllib.parse.urlencode({'new_status': 'OPEN', 'reason': 'Test reset'})
+req_reset2 = urllib.request.Request(BASE + f'/judges/evaluations/{eval_id}/status?' + params_reset2, method='POST')
+req_reset2.add_header('Authorization', f'Bearer {hjt}')
+try:
+    urllib.request.urlopen(req_reset2)
+    print(f'Reset eval {eval_id} to OPEN')
+except:
+    pass
+
 # Add score
 req2 = urllib.request.Request(BASE + f'/judges/evaluations/{eval_id}/scores?criterion_id=1&score=8', method='POST')
 req2.add_header('Authorization', f'Bearer {hjt}')

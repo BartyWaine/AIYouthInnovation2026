@@ -207,6 +207,7 @@ Migrations support both SQLite (development) and PostgreSQL (production) dialect
   - Download links for submitted files
   - Score input (number box, submits on blur)
 - Can filter by competition (all / comp 1 / comp 2 / comp 3)
+- Score input accepts points tailored to each specific criterion's maximum limit (0 to max), rather than a flat 1–10 scale
 
 ### 5. Head Judge Flow
 - Head Judge logs in → sees "Head Judge" link in navbar → navigates to `/head-judge-dashboard`
@@ -222,9 +223,20 @@ Migrations support both SQLite (development) and PostgreSQL (production) dialect
 
 ### 6. Evaluation
 
-- Judge enters a score (1–10, integer) per team per criterion in the dashboard
+- Judge enters a score per team per criterion in the dashboard
+- Each criterion has its own maximum point value; scores must be between 0 and that criterion's maximum
 - Score submits automatically on blur (onBlur event)
 - Scores appear inline in the dashboard table
+
+#### Evaluation Rubric
+
+| Criterion | Max Points | Description |
+|-----------|-----------|-------------|
+| **Innovation** | 30 | Originality and creativity of the AI solution |
+| **Feasibility** | 25 | Technical practicality and implementation viability |
+| **Presentation** | 25 | Clarity, delivery, and quality of the demonstration |
+| **Impact** | 20 | Potential real-world benefit and scalability |
+| **Total** | **100** | Sum of all criterion scores |
 
 #### Evaluation Lifecycle (Head Judge / Admin controls)
 
@@ -350,8 +362,31 @@ Create a `.env` file in `backend/`:
 ```env
 DATABASE_URL=postgresql://user:password@localhost:5432/competition_db
 JWT_SECRET=<generate with: python -c "import secrets; print(secrets.token_hex(32))">
+ENVIRONMENT=production
+RATE_LIMIT_STORAGE=redis://redis:6379
 OPENAI_API_KEY=  # optional
 ```
+
+**Rate limiting**: The application uses `slowapi` for rate limiting.
+
+- In development or single-process deployments, `RATE_LIMIT_STORAGE` can remain unset (defaults to `memory://`).
+- **Before scaling beyond one worker or deploying to Kubernetes**, you must provision Redis and set `RATE_LIMIT_STORAGE=redis://redis:6379` (or your Redis URL). Without Redis, each worker will enforce limits independently, which can allow rate-limit bypass and inconsistent throttling.
+
+**Startup validation**: At startup, the application checks whether `RATE_LIMIT_STORAGE=memory://` is used together with multiple workers. In production, this configuration is rejected with a `RuntimeError` to prevent silent misconfiguration. In development, a warning is logged but the application continues.
+
+**Per-endpoint tuning**: You can tune limits per endpoint with these optional environment variables:
+
+```env
+RATE_LIMIT_LOGIN=5/minute
+RATE_LIMIT_CHANGE_PASSWORD=5/minute
+RATE_LIMIT_RESET_PASSWORD=5/minute
+RATE_LIMIT_UPLOAD=10/minute
+RATE_LIMIT_CORRECT_SCORE=5/minute
+RATE_LIMIT_EVAL_STATUS=5/minute
+RATE_LIMIT_CREATE_DELIVERABLE=5/minute
+```
+
+Omit any variable to use the default limit (`RATE_LIMIT_DEFAULT`, which defaults to `5/minute`). Values can be `<number>`, `<number>/minute`, or `<number>/hour`.
 
 ### 3. Secure JWT Configuration
 
@@ -370,12 +405,483 @@ This creates `dist/` with optimized static assets. Use `npm run preview` to test
 
 ### 5. Backend Deployment
 
+Follow this order exactly. Do not scale workers before shared Redis is confirmed.
+
+#### a. Provision Redis or start the internal Redis service
+
+For Docker Compose deployments, Redis is already defined in `docker-compose.yml`. Start it with:
+
+```bash
+docker compose up -d redis
+```
+
+For other environments, provision a Redis instance reachable from the backend. Ensure it is not exposed publicly. Example using Docker:
+
+```bash
+docker run -d \
+  --name redis \
+  --restart always \
+  -p 127.0.0.1:6379:6379 \
+  redis:7-alpine \
+  redis-server --save "" --appendonly no
+```
+
+- `127.0.0.1:6379` binds to localhost only; do not expose Redis to the public internet.
+- `--save "" --appendonly no` disables persistence for rate-limit data.
+
+#### b. Set `RATE_LIMIT_STORAGE` to the shared Redis URL
+
+Set `RATE_LIMIT_STORAGE` in your `.env` to the Redis URL the backend can reach. Use placeholders only; never put real passwords or tokens in shared configuration files.
+
+```env
+# docker-compose (service name is redis):
+RATE_LIMIT_STORAGE=redis://redis:6379/0
+
+# Kubernetes (use a Service name or managed Redis hostname):
+# RATE_LIMIT_STORAGE=redis://redis.default.svc.cluster.local:6379/0
+
+# Native / systemd (local or managed):
+# RATE_LIMIT_STORAGE=redis://127.0.0.1:6379/0
+```
+
+If your Redis requires authentication, use a secret-safe placeholder and inject the real value through your deployment system:
+
+```env
+# Placeholder only — replace with your secrets manager reference:
+RATE_LIMIT_STORAGE=redis://:${REDIS_PASSWORD}@redis:6379/0
+```
+
+#### c. Set the production environment variables securely
+
 ```bash
 cd backend
 pip install -r requirements.txt
 alembic upgrade head
+```
+
+Ensure `ENVIRONMENT=production` and `RATE_LIMIT_STORAGE` are set in the backend environment. Keep `WEB_CONCURRENCY=1` until step `e` succeeds.
+
+#### d. Start the backend with one worker
+
+```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+Do not pass `--workers` greater than 1 yet.
+
+#### e. Verify that startup succeeds and rate-limit storage is Redis
+
+- If the backend logs a `RuntimeError` about `memory://` with multiple workers, fix `RATE_LIMIT_STORAGE` before continuing.
+- If the backend starts cleanly, look for the startup log line:
+  - `Rate-limit storage configured: shared Redis` — confirms shared storage is active.
+- If the log shows `in-memory (single-worker only)`, Redis is not configured correctly.
+
+Only proceed to step `f` after the startup log confirms shared Redis.
+
+#### f. Increase the worker count only after shared Redis is confirmed
+
+```bash
+# Example: 4 workers with shared Redis
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+Or update your deployment process to use the approved worker count.
+
+#### g. Restart or redeploy the backend using the approved deployment process
+
+Use your standard deployment pipeline to roll out the new worker count. Do not change worker counts ad-hoc.
+
+### 5a. Redis for Rate Limiting (Production)
+
+The backend uses `slowapi` for rate limiting. Rate-limit counters are stored in Redis so they are shared across all workers. **Before scaling beyond one worker, you must provision Redis and set `RATE_LIMIT_STORAGE`.**
+
+If `RATE_LIMIT_STORAGE` is left as `memory://` and the application is started with multiple workers in production, it will fail at startup with a clear configuration error. In development, a warning is logged instead.
+
+#### Docker
+
+```bash
+docker run -d \
+  --name redis \
+  --restart always \
+  -p 127.0.0.1:6379:6379 \
+  redis:7-alpine \
+  redis-server --save "" --appendonly no
+```
+
+- `--restart always` ensures Redis starts on boot.
+- `127.0.0.1:6379` binds to localhost only; adjust if remote access is required.
+- `--save "" --appendonly no` disables persistence for rate-limit data (ephemeral).
+
+#### docker-compose
+
+Add to your `docker-compose.yml`:
+
+```yaml
+services:
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: redis-server --save "" --appendonly no
+    volumes:
+      - redis_data:/data
+volumes:
+  redis_data:
+```
+
+Then set in `.env`:
+
+```env
+RATE_LIMIT_STORAGE=redis://redis:6379
+```
+
+#### Native / systemd (no containers)
+
+Install Redis and enable it:
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install redis-server
+sudo systemctl enable --now redis
+
+# Verify
+redis-cli ping
+# Expected: PONG
+```
+
+Set in `.env`:
+
+```env
+RATE_LIMIT_STORAGE=redis://127.0.0.1:6379
+```
+
+#### Kubernetes
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ["redis-server", "--save", "", "--appendonly", "no"]
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  ports:
+    - port: 6379
+      targetPort: 6379
+  selector:
+    app: redis
+```
+
+Set in your backend deployment environment:
+
+```env
+RATE_LIMIT_STORAGE=redis://redis.default.svc.cluster.local:6379
+```
+
+#### Monitoring
+
+Verify Redis is reachable from the backend:
+
+```bash
+redis-cli -h <redis-host> ping
+```
+
+Monitor with:
+
+```bash
+redis-cli info stats
+# Look for: total_connections_received, total_commands_processed
+```
+
+If using Prometheus, add the [Redis exporter](https://github.com/oliver006/redis_exporter) to monitor memory, connections, and command latency.
+
+#### 429 Monitoring and Alerting
+
+Every rate-limit response emits one structured log event. The event name is `rate_limit_exceeded`.
+
+Example log output:
+
+```json
+{
+  "event": "rate_limit_exceeded",
+  "method": "POST",
+  "path": "/auth/login",
+  "status": 429,
+  "rate_limit": "5 per 1 minute",
+  "request_id": "optional-correlation-id",
+  "timestamp": "2026-09-07T14:00:00+00:00"
+}
+```
+
+**Count 429 events**:
+
+```bash
+# grep / journalctl / log aggregation filter:
+grep '"event":"rate_limit_exceeded"' app.log | wc -l
+```
+
+**Group by route**:
+
+```bash
+grep '"event":"rate_limit_exceeded"' app.log \
+  | grep -o '"path":"[^"]*"' \
+  | sort | uniq -c | sort -rn
+```
+
+**Group by rate-limit category**:
+
+```bash
+grep '"event":"rate_limit_exceeded"' app.log \
+  | grep -o '"rate_limit":"[^"]*"' \
+  | sort | uniq -c | sort -rn
+```
+
+**Recommended alerting**:
+
+- **Warning**: 429 rate exceeds 2× the normal baseline for a 5-minute window. This may indicate a burst of legitimate traffic or a misconfigured client.
+- **Critical**: 429 rate exceeds 5× the normal baseline, or a single endpoint accounts for >80% of 429s. This likely indicates abuse or a credential-stuffing attack.
+
+**Distinguishing abusive traffic from legitimate users**:
+
+- Look at the `path` field: a single endpoint with a spike is likely abuse; widespread 429s across many endpoints may indicate a load spike.
+- Correlate `request_id` with your application logs to trace the originating user or service.
+- If using a reverse proxy, check `X-Forwarded-For` in your access logs to identify the client IP.
+- Block or challenge IPs that generate sustained 429s rather than raising global limits.
+
+**Do not** disable rate limiting merely because 429s increase. 429s are expected behavior under load and are a signal to investigate, not to remove protection.
+
+### Rate-Limit Tuning
+
+Current default and endpoint-specific limits:
+
+| Endpoint | Environment variable | Default | Purpose |
+|----------|---------------------|---------|---------|
+| Global default | `RATE_LIMIT_DEFAULT` | `5/minute` | Fallback for any endpoint without an explicit limit |
+| Login | `RATE_LIMIT_LOGIN` | `5/minute` | Prevent credential stuffing |
+| Change password | `RATE_LIMIT_CHANGE_PASSWORD` | `5/minute` | Prevent password-change abuse |
+| Reset password | `RATE_LIMIT_RESET_PASSWORD` | `5/minute` | Prevent password-reset abuse |
+| File upload | `RATE_LIMIT_UPLOAD` | `10/minute` | Allow batch uploads while limiting abuse |
+| Score correction | `RATE_LIMIT_CORRECT_SCORE` | `5/minute` | Limit head-judge correction rate |
+| Evaluation status | `RATE_LIMIT_EVAL_STATUS` | `5/minute` | Limit evaluation state changes |
+| Deliverable creation | `RATE_LIMIT_CREATE_DELIVERABLE` | `5/minute` | Limit admin deliverable creation |
+
+**When to tune**:
+
+- Change only the relevant `RATE_LIMIT_*` variable for the affected endpoint.
+- Restart or reload the backend service after changing any `RATE_LIMIT_*` value.
+- Monitor 429 rates after the change to confirm the new limit is appropriate.
+- Confirm that abusive traffic is still limited after raising a limit.
+- Record the reason for every production tuning change in your change-management system.
+
+**Do not** change limits preemptively. Adjust only after reviewing actual traffic patterns and 429 logs.
+
+### Rate-Limit Monitoring and Tuning Runbook
+
+#### 429 JSON Schema
+
+Every rate-limit response emits exactly one structured JSON log event.
+
+```json
+{
+  "event": "rate_limit_exceeded",
+  "method": "POST",
+  "path": "/auth/login",
+  "status": 429,
+  "rate_limit": "5 per 1 minute",
+  "request_id": "req-abc-123",
+  "timestamp": "2026-09-07T16:00:00+00:00"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `event` | string | yes | Always `rate_limit_exceeded` |
+| `method` | string | yes | HTTP method, e.g. `POST` |
+| `path` | string | yes | Normalized route template, e.g. `/auth/login` |
+| `status` | integer | yes | Always `429` |
+| `rate_limit` | string | yes | Human-readable limit, e.g. `5 per 1 minute` |
+| `request_id` | string | yes | Correlation ID from `X-Request-ID` or `X-Correlation-ID`; `"-"` if absent |
+| `timestamp` | string | yes | ISO-8601 UTC timestamp |
+
+**What is never logged**:
+- Authorization headers
+- JWTs or API keys
+- Passwords
+- Redis passwords or complete credential-bearing URLs
+- Unnecessary email addresses or personal data
+- Sensitive query-string values
+
+#### Log Analysis CLI Commands
+
+This project does not include a separate metrics system. Use the existing structured logs to monitor 429s.
+
+**Count total 429 events**:
+
+```bash
+grep '"event":"rate_limit_exceeded"' app.log | wc -l
+```
+
+Or with `jq` if logs are JSON-per-line:
+
+```bash
+jq -r 'select(.event=="rate_limit_exceeded") | .event' app.log | wc -l
+```
+
+**Group by normalized route**:
+
+```bash
+grep '"event":"rate_limit_exceeded"' app.log \
+  | grep -o '"path":"[^"]*"' \
+  | sort | uniq -c | sort -rn
+```
+
+Or with `jq`:
+
+```bash
+jq -r 'select(.event=="rate_limit_exceeded") | .path' app.log | sort | uniq -c | sort -rn
+```
+
+**Group by safe rate-limit category** (`rate_limit` field)**:
+
+```bash
+grep '"event":"rate_limit_exceeded"' app.log \
+  | grep -o '"rate_limit":"[^"]*"' \
+  | sort | uniq -c | sort -rn
+```
+
+Or with `jq`:
+
+```bash
+jq -r 'select(.event=="rate_limit_exceeded") | .rate_limit' app.log | sort | uniq -c | sort -rn
+```
+
+**Compare 429 volume over time** (hourly buckets):
+
+```bash
+grep '"event":"rate_limit_exceeded"' app.log \
+  | awk -F'"timestamp":"' '{print $2}' \
+  | awk -F'"' '{print $1}' \
+  | cut -d'T' -f2 \
+  | cut -d':' -f1 \
+  | sort | uniq -c
+```
+
+Or with `jq`:
+
+```bash
+jq -r 'select(.event=="rate_limit_exceeded") | .timestamp' app.log \
+  | cut -d'T' -f2 | cut -d':' -f1 | sort | uniq -c
+```
+
+**Identify the top throttled route**:
+
+```bash
+grep '"event":"rate_limit_exceeded"' app.log \
+  | grep -o '"path":"[^"]*"' \
+  | sort | uniq -c | sort -rn | head -n 5
+```
+
+Or with `jq`:
+
+```bash
+jq -r 'select(.event=="rate_limit_exceeded") | .path' app.log \
+  | sort | uniq -c | sort -rn | head -n 5
+```
+
+If one endpoint accounts for a disproportionate share of 429s, focus investigation there rather than changing global limits.
+
+#### Investigation process before tuning
+
+Do not tune `RATE_LIMIT_*` values without evidence. Follow this process:
+
+1. **Review the time window and baseline**
+   - Determine whether the 429 spike is sustained or a short burst.
+   - Compare against the normal baseline for the same time of day/week.
+
+2. **Identify the affected endpoint and limiter**
+   - Use the `path` field to identify the endpoint.
+   - Use the `rate_limit` field to identify which limit was hit.
+
+3. **Check whether requests come from abusive, automated, or legitimate traffic**
+   - A single IP or a small set of IPs generating many 429s suggests abuse.
+   - Widespread 429s across many IPs may indicate a legitimate load spike or misconfigured client.
+   - Correlate `request_id` with application logs to trace users or services.
+
+4. **Check whether failures are concentrated in one user flow or deployment instance**
+   - One endpoint spike: likely abuse or a misconfigured client.
+   - Many endpoints affected: likely a deployment-wide load issue.
+
+5. **Confirm that shared `RATE_LIMIT_STORAGE` is working when multiple workers are used**
+   - Verify startup log shows `Rate-limit storage configured: shared Redis`.
+   - If the log shows `in-memory (single-worker only)`, fix storage before tuning limits.
+
+6. **Determine whether the issue is a real product-traffic pattern or an attack**
+   - Legitimate traffic: consider a small, temporary increase for the affected endpoint only.
+   - Attack: keep or tighten limits; do not raise them.
+
+7. **Record the evidence and proposed change**
+   - Document the endpoint, current limit, observed 429 rate, traffic pattern, and proposed new limit.
+   - Do not make changes without this record.
+
+#### Safe tuning protocols
+
+If the investigation concludes that a limit increase is justified:
+
+- Change **only** the affected `RATE_LIMIT_*` variable. Do not raise all limits globally.
+- Do not remove the limit. Keep some ceiling in place.
+- Prefer a small incremental increase, e.g. from `5/minute` to `10/minute`, not `100/minute`.
+- Keep strict limits for security-sensitive actions:
+  - `RATE_LIMIT_LOGIN`
+  - `RATE_LIMIT_CHANGE_PASSWORD`
+  - `RATE_LIMIT_RESET_PASSWORD`
+- Apply changes through the normal deployment configuration process (environment variables or secrets manager).
+- Restart or reload the backend service after changing any `RATE_LIMIT_*` value.
+- Monitor 429 rates after the change to confirm the new limit is appropriate.
+- Confirm that abusive traffic is still limited after raising a limit.
+- Record the reason, old value, new value, date, and approver for every production tuning change.
+- Revert the change if abuse increases or protection is weakened unnecessarily.
+
+**Current defaults** (do not change without evidence):
+
+| Endpoint | Environment variable | Default | Purpose |
+|----------|---------------------|---------|---------|
+| Global default | `RATE_LIMIT_DEFAULT` | `5/minute` | Fallback for any endpoint without an explicit limit |
+| Login | `RATE_LIMIT_LOGIN` | `5/minute` | Prevent credential stuffing |
+| Change password | `RATE_LIMIT_CHANGE_PASSWORD` | `5/minute` | Prevent password-change abuse |
+| Reset password | `RATE_LIMIT_RESET_PASSWORD` | `5/minute` | Prevent password-reset abuse |
+| File upload | `RATE_LIMIT_UPLOAD` | `10/minute` | Allow batch uploads while limiting abuse |
+| Score correction | `RATE_LIMIT_CORRECT_SCORE` | `5/minute` | Limit head-judge correction rate |
+| Evaluation status | `RATE_LIMIT_EVAL_STATUS` | `5/minute` | Limit evaluation state changes |
+| Deliverable creation | `RATE_LIMIT_CREATE_DELIVERABLE` | `5/minute` | Limit admin deliverable creation |
+
+**If no real traffic logs or metrics are available, leave the current values unchanged.** Monitoring must occur first.
 
 ### 6. Reverse Proxy & HTTPS
 

@@ -3,7 +3,7 @@ import os
 import hashlib
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Form, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, Form, File, UploadFile, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from ..database import get_db
 from .. import models
 from ..security import get_current_user, require_role
+from ..rate_limiter import limiter, get_limit
 
 router = APIRouter(prefix="/deliverables", tags=["submissions"])
 
@@ -130,6 +131,7 @@ def list_deliverables(
 
 
 @router.post("")
+@limiter.limit(get_limit("RATE_LIMIT_CREATE_DELIVERABLE", "5/minute"))
 def create_deliverable(
     competition_id: int,
     name: str,
@@ -140,6 +142,7 @@ def create_deliverable(
     category: models.DeliverableCategory = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role('ADMIN')),
+    request: Request = None,
 ):
     if db.get(models.Competition, competition_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Competition not found")
@@ -156,11 +159,19 @@ def create_deliverable(
     db.commit()
     db.refresh(deliverable)
     # Audit log for deliverable creation
+    ip_address = None
+    if request is not None:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            ip_address = forwarded.split(",")[0].strip()
+        else:
+            ip_address = request.client.host if request.client else None
     audit = models.AuditLog(
         user_id=current_user.id,
         action='create_deliverable',
         entity_type='Deliverable',
         entity_id=deliverable.id,
+        ip_address=ip_address,
     )
     db.add(audit)
     db.commit()
@@ -228,6 +239,7 @@ def create_submission(
     submission_status: str = "OPEN",
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role('TEAM_MEMBER')),
+    request: Request = None,
 ):
     if db.get(models.Deliverable, deliverable_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deliverable not found")
@@ -247,11 +259,19 @@ def create_submission(
     db.add(submission)
     db.commit()
     db.refresh(submission)
+    ip_address = None
+    if request is not None:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            ip_address = forwarded.split(",")[0].strip()
+        else:
+            ip_address = request.client.host if request.client else None
     audit = models.AuditLog(
         user_id=current_user.id,
         action='create_submission',
         entity_type='Submission',
         entity_id=submission.id,
+        ip_address=ip_address,
     )
     db.add(audit)
     db.commit()
@@ -266,12 +286,14 @@ def create_submission(
 
 
 @router.post("/submissions/{submission_id}/files")
+@limiter.limit(get_limit("RATE_LIMIT_UPLOAD", "10/minute"))
 def add_file(
     submission_id: int,
     file: UploadFile = File(...),
     version: int = Form(1),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role('TEAM_MEMBER')),
+    request: Request = None,
 ):
     submission = db.get(models.Submission, submission_id)
     if submission is None:
@@ -471,6 +493,7 @@ def update_submission_status(
     new_status: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    request: Request = None,
 ):
     role = current_user.role.value
     if role not in ("ADMIN", "HEAD_JUDGE", "JUDGE"):
@@ -484,12 +507,20 @@ def update_submission_status(
     submission.status = models.SubmissionStatus[new_status]
     db.commit()
     db.refresh(submission)
+    ip_address = None
+    if request is not None:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            ip_address = forwarded.split(",")[0].strip()
+        else:
+            ip_address = request.client.host if request.client else None
     audit = models.AuditLog(
         user_id=current_user.id,
         action='update_submission_status',
         entity_type='Submission',
         entity_id=submission.id,
         metadata_json={"old_status": old_status, "new_status": new_status},
+        ip_address=ip_address,
     )
     db.add(audit)
     db.commit()

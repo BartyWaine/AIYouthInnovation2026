@@ -12,11 +12,20 @@ services:
     expose:
       - "5432"
 
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save "" --appendonly no
+    volumes:
+      - redis_data:/data
+    expose:
+      - "6379"
+
   backend:
     build: ./backend
     env_file: .env
     depends_on:
       - db
+      - redis
     volumes:
       - ./storage:/app/storage
     command: >
@@ -47,3 +56,4 @@ services:
 
 volumes:
   pg_data:
+  redis_data:

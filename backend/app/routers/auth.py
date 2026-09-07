@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from .. import models
+from ..rate_limiter import limiter, get_limit
 from ..security import (
     verify_password,
     create_access_token,
@@ -16,7 +17,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/login")
+@limiter.limit(get_limit("RATE_LIMIT_LOGIN", "5/minute"))
 def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
@@ -62,16 +65,18 @@ def register(
 
 
 @router.post("/change-password")
+@limiter.limit(get_limit("RATE_LIMIT_CHANGE_PASSWORD", "5/minute"))
 def change_password(
     current_password: str = Body(...),
     new_password: str = Body(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
+    request: Request = None,
 ):
     if not verify_password(current_password, current_user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
-    if len(new_password) < 6:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must be at least 6 characters")
+    if len(new_password) < 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must be at least 8 characters")
     user = db.get(models.User, current_user.id)
     user.password_hash = get_password_hash(new_password)
     db.commit()
@@ -80,11 +85,13 @@ def change_password(
 
 
 @router.post("/reset-password")
+@limiter.limit(get_limit("RATE_LIMIT_RESET_PASSWORD", "5/minute"))
 def reset_password(
     user_id: int = Body(...),
     new_password: str = Body(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("ADMIN")),
+    request: Request = None,
 ):
     user = db.get(models.User, user_id)
     if not user:

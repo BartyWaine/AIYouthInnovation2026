@@ -298,9 +298,11 @@ def add_file(
     submission = db.get(models.Submission, submission_id)
     if submission is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+    if submission.status in (models.SubmissionStatus.SUBMITTED, models.SubmissionStatus.LOCKED):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This submission is locked and cannot be modified")
     team_member = db.query(models.TeamMember).filter(
         models.TeamMember.team_id == submission.team_id,
-        models.TeamMember.user_id == current_user.id,
+        models.TeamMember.user_id == current_user.id
     ).first()
     if not team_member:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not part of the submission's team")
@@ -375,6 +377,51 @@ def add_file(
         "uploaded_at": db_file.uploaded_at,
         "submitted_at": db_file.submitted_at,
     }
+
+
+@router.post("/submissions/{submission_id}/submit")
+def submit_submission(
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role('TEAM_MEMBER')),
+    request: Request = None,
+):
+    submission = db.get(models.Submission, submission_id)
+    if submission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+    if submission.status in (models.SubmissionStatus.SUBMITTED, models.SubmissionStatus.LOCKED):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This submission is already submitted or locked")
+    team_member = db.query(models.TeamMember).filter(
+        models.TeamMember.team_id == submission.team_id,
+        models.TeamMember.user_id == current_user.id
+    ).first()
+    if not team_member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not part of the submission's team")
+
+    submission.status = models.SubmissionStatus.SUBMITTED
+    db.commit()
+    db.refresh(submission)
+
+    ip_address = None
+    if request is not None:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            ip_address = forwarded.split(",")[0].strip()
+        else:
+            ip_address = request.client.host if request.client else None
+    audit = models.AuditLog(
+        user_id=current_user.id,
+        action='submit_submission',
+        entity_type='Submission',
+        entity_id=submission.id,
+        metadata_json={"old_status": "OPEN", "new_status": "SUBMITTED"},
+        ip_address=ip_address,
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(audit)
+
+    return {"id": submission.id, "status": submission.status.value}
 
 
 @router.get("/submissions/{submission_id}/files")
@@ -538,9 +585,11 @@ def delete_file(
     submission = db.get(models.Submission, submission_id)
     if submission is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+    if submission.status in (models.SubmissionStatus.SUBMITTED, models.SubmissionStatus.LOCKED):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This submission is locked and cannot be modified")
     team_member = db.query(models.TeamMember).filter(
         models.TeamMember.team_id == submission.team_id,
-        models.TeamMember.user_id == current_user.id,
+        models.TeamMember.user_id == current_user.id
     ).first()
     if not team_member:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not part of the submission's team")

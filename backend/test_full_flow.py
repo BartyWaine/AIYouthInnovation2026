@@ -28,8 +28,16 @@ print(f'Team: {team_info.get("name")}, Comp: {comp_id}')
 subs = api_get(f'/teams/mine/submissions?competition_id={comp_id}', token)
 print(f'Submissions: {len(subs)}')
 
-if subs:
-    sub_id = subs[0]['id']
+# Find a submission that is not already locked/submitted
+sub_id = None
+for s in subs:
+    if s.get('status') not in ('SUBMITTED', 'LOCKED'):
+        sub_id = s['id']
+        break
+
+if not sub_id:
+    print('All submissions are already locked/submitted, skipping upload test')
+else:
     boundary = uuid.uuid4().hex
     body = (
         b'--' + boundary.encode() + b'\r\n'
@@ -43,10 +51,14 @@ if subs:
     req = urllib.request.Request(BASE + f'/deliverables/submissions/{sub_id}/files', data=body, method='POST')
     req.add_header('Content-Type', f'multipart/form-data; boundary={boundary}')
     req.add_header('Authorization', f'Bearer {token}')
-    resp = urllib.request.urlopen(req)
-    upload = json.loads(resp.read())
-    print(f'Upload: file={upload.get("original_filename")}, v={upload.get("version")}')
-    print(f'submitted_at={upload.get("submitted_at")}')
+    try:
+        resp = urllib.request.urlopen(req)
+        upload = json.loads(resp.read())
+        print(f'Upload: file={upload.get("original_filename")}, v={upload.get("version")}')
+        print(f'submitted_at={upload.get("submitted_at")}')
+    except urllib.error.HTTPError as e:
+        print(f'Upload failed: {e.code} - {e.read().decode()[:200]}')
+        raise
 
 # Judge downloads
 jtoken = login('judge1@sti.edu.mm', 'judge123')

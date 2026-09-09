@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getMyTeam, getMyTeamSubmissions } from '../api/teams'
-import { listDeliverables, createSubmission, addFile, getSubmissionFiles, downloadFile, deleteFile } from '../api/deliverables'
+import { listDeliverables, createSubmission, addFile, getSubmissionFiles, downloadFile, deleteFile, submitSubmission } from '../api/deliverables'
 import { getRankings } from '../api/competitions'
 import { getFileIcon, formatFileSize } from '../utils'
 
@@ -11,6 +11,7 @@ export default function TeamUploads() {
   const [files, setFiles] = useState({})
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState({})
+  const [submitting, setSubmitting] = useState({})
   const [error, setError] = useState('')
   const [activeTab, setActiveTab] = useState('uploads')
   const [rankings, setRankings] = useState([])
@@ -97,6 +98,20 @@ export default function TeamUploads() {
     }
   }
 
+  const handleSubmitFinal = async (submissionId) => {
+    setError('')
+    setSubmitting(prev => ({ ...prev, [submissionId]: true }))
+    try {
+      const result = await submitSubmission(submissionId)
+      setSubmissions(prev => prev.map(s => s.id === submissionId ? { ...s, status: result.status } : s))
+      alert('Submission finalized successfully!')
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to submit final')
+    } finally {
+      setSubmitting(prev => ({ ...prev, [submissionId]: false }))
+    }
+  }
+
   if (loading) return <div className="p-6">Loading...</div>
   if (error) return <div className="p-6 text-red-600">{error}</div>
   if (!team) return <div className="p-6">You are not assigned to any team.</div>
@@ -177,10 +192,11 @@ export default function TeamUploads() {
                           {formatFileSize(f.file_size)}
                         </span>
                       </div>
-                        <button
-                          onClick={() => downloadFile(sub.id, f.id, f.original_filename).catch(err => setError(err.message || 'Download failed'))}
-                          className="text-indigo-600 hover:text-indigo-800 text-xs px-2 py-1 border border-indigo-200 rounded"
-                        >Download</button>
+                      <button
+                        onClick={() => downloadFile(sub.id, f.id, f.original_filename).catch(err => setError(err.message || 'Download failed'))}
+                        className="text-indigo-600 hover:text-indigo-800 text-xs px-2 py-1 border border-indigo-200 rounded"
+                      >Download</button>
+                      {sub?.status !== 'SUBMITTED' && sub?.status !== 'LOCKED' && (
                         <button
                           onClick={async () => {
                             if (!window.confirm('Delete this file?')) return
@@ -194,6 +210,7 @@ export default function TeamUploads() {
                           }}
                           className="text-red-600 hover:text-red-800 text-xs px-2 py-1 border border-red-200 rounded"
                         >Delete</button>
+                      )}
                       <div className="flex flex-col items-end text-xs text-gray-400">
                         <span>v{f.version || 1}</span>
                         {f.submitted_at && <span>Submitted: {new Date(f.submitted_at).toLocaleString()}</span>}
@@ -203,23 +220,42 @@ export default function TeamUploads() {
                 </div>
               )}
 
-              <label className="flex items-center gap-3 text-sm cursor-pointer">
-                <input
-                  type="file"
-                  accept=".docx,.pdf,.pptx,.zip,.mp4,.png,.jpg,.jpeg"
-                  onChange={(e) => {
-                    const file = e.target.files[0]
-                    if (file) handleUpload(d.id, file)
-                    e.target.value = ''
-                  }}
-                  disabled={uploading[d.id]}
-                  className="hidden"
-                />
-                <span className={submissionFiles.length > 0 ? 'text-indigo-600 font-semibold' : 'text-gray-500'}>
-                  {uploading[d.id] === 'uploading' ? 'Uploading...' : submissionFiles.length > 0 ? 'Replace File' : 'Choose File'}
-                </span>
-              </label>
-              {uploading[d.id] === 'uploading' && <p className="text-xs text-gray-500 mt-2">Uploading...</p>}
+              {sub?.status !== 'SUBMITTED' && sub?.status !== 'LOCKED' ? (
+                <>
+                  <label className="flex items-center gap-3 text-sm cursor-pointer">
+                    <input
+                      type="file"
+                      accept=".docx,.pdf,.pptx,.zip,.mp4,.png,.jpg,.jpeg"
+                      onChange={(e) => {
+                        const file = e.target.files[0]
+                        if (file) handleUpload(d.id, file)
+                        e.target.value = ''
+                      }}
+                      disabled={uploading[d.id]}
+                      className="hidden"
+                    />
+                    <span className={submissionFiles.length > 0 ? 'text-indigo-600 font-semibold' : 'text-gray-500'}>
+                      {uploading[d.id] === 'uploading' ? 'Uploading...' : submissionFiles.length > 0 ? 'Replace File' : 'Choose File'}
+                    </span>
+                  </label>
+                  {uploading[d.id] === 'uploading' && <p className="text-xs text-gray-500 mt-2">Uploading...</p>}
+                  <div className="mt-3">
+                    <button
+                      onClick={() => handleSubmitFinal(sub.id)}
+                      disabled={submitting[sub.id] || !sub}
+                      className="px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {submitting[sub.id] ? 'Submitting...' : 'Submit Final'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="mt-3">
+                  <span className="inline-flex items-center px-3 py-2 bg-gray-200 text-gray-700 rounded text-sm font-medium cursor-not-allowed">
+                    Submitted
+                  </span>
+                </div>
+              )}
             </div>
           )
         })}

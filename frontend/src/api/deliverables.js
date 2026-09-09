@@ -12,7 +12,7 @@ export const addFile = (submissionId, file) => {
 }
 export const getSubmissionFiles = (submissionId) => api.get(`/deliverables/submissions/${submissionId}/files`).then(r => r.data)
 export const deleteFile = (submissionId, fileId) => api.delete(`/deliverables/submissions/${submissionId}/files/${fileId}`).then(r => r.data)
-export const listSubmissionFiles = (delivId) => api.get(`/deliverables/${delivId}/submissions`).then(r => r.data)
+export const submitSubmission = (submissionId) => api.post(`/deliverables/submissions/${submissionId}/submit`).then(r => r.data)
 export const downloadFile = async (submissionId, fileId, filename) => {
   const token = localStorage.getItem('token')
   const res = await fetch(`/api/v1/deliverables/submissions/${submissionId}/files/${fileId}/download`, {
